@@ -30,7 +30,7 @@ def _setup_logging():
                             os.remove(rotated_log)
                             break
         handler = GzTimedRotatingFileHandler(log_file, when='midnight', backupCount=7, encoding='utf-8', delay=True)
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
         for h in logger.handlers[:]:
@@ -40,42 +40,56 @@ def _setup_logging():
 
 _setup_logging()
 
+BOORU_APIS = {
+    'rule34': {
+        'url': "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index",
+        'params': lambda tags, limit: {'tags': tags, 'limit': limit, 'json': 1},
+        'headers': {'Accept': 'application/json'},
+        'process': lambda data: data
+    },
+    'safebooru': {
+        'url': "https://safebooru.org/index.php?page=dapi&s=post&q=index",
+        'params': lambda tags, limit: {'tags': tags, 'limit': limit, 'json': 1},
+        'headers': {'Accept': 'application/json'},
+        'process': lambda data: data
+    },
+    'danbooru': {
+        'url': "https://danbooru.donmai.us/posts.json",
+        'params': lambda tags, limit: {'tags': tags or '', 'limit': limit},
+        'headers': {'Accept': 'application/json'},
+        'process': lambda data: data  # Danbooru returns a list of posts
+    },
+    # Add more booru types here
+}
+
 def fetch_booru_posts(booru_type, tags=None, limit=10):
-    if booru_type == 'rule34':
-        url = "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index"
-    elif booru_type == 'safebooru':
-        url = "https://safebooru.org/index.php?page=dapi&s=post&q=index"
-    else:
-        logging.error(f"Unsupported booru type: {booru_type}")
+    api = BOORU_APIS.get(booru_type)
+    if not api:
+        logging.getLogger("booru_api").error(f"[booru_api.fetch_booru_posts] Unsupported booru type: {booru_type}")
         return []
-
-    params = {
-        'tags': tags,
-        'limit': limit,
-        'json': 1
-    }
-
-    headers = {'Accept': 'application/json'}
-
+    url = api['url']
+    params = api['params'](tags, limit)
+    headers = api.get('headers', {})
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
         response.raise_for_status()
     except requests.RequestException as e:
-        logging.error(f"Error fetching data from {booru_type} API: {e}")
+        logging.getLogger("booru_api").error(f"[booru_api.fetch_booru_posts] Error fetching data from {booru_type} API: {e}\nURL: {url}\nParams: {params}")
         return []
-
     try:
         data = response.json()
     except ValueError as e:
-        logging.error(f"Invalid JSON response from {booru_type} API. Error: {e}")
+        logging.getLogger("booru_api").error(f"[booru_api.fetch_booru_posts] Invalid JSON response from {booru_type} API. Error: {e}\nURL: {url}\nParams: {params}\nResponse text: {response.text[:500]}")
         return []
-
-    return data
+    posts = api['process'](data)
+    if not posts:
+        logging.getLogger("booru_api").warning(f"[booru_api.fetch_booru_posts] Empty results from {booru_type} API.\nURL: {url}\nParams: {params}\nResponse: {data}")
+    return posts
 
 def download_image(post, image_url, output_dir):
     try:
         if not image_url or not image_url.startswith(('http://', 'https://')):
-            logging.warning(f"Invalid image URL for post ID {post['id']}: {image_url}")
+            logging.getLogger("booru_api").warning(f"[booru_api.download_image] Invalid image URL for post ID {post['id']}: {image_url}")
             return
 
         response = requests.get(image_url, stream=True, timeout=10)
@@ -84,9 +98,10 @@ def download_image(post, image_url, output_dir):
         content_type = response.headers.get('Content-Type', '')
         extension = ''
 
-        if '.' in image_url.split('/')[-1]:
-            filename_part = image_url.split('/')[-1]
-            _, ext = os.path.splitext(filename_part)
+        # Remove query parameters from filename (for sancomplex and similar)
+        filename_part = image_url.split('/')[-1].split('?')[0]
+        _, ext = os.path.splitext(filename_part)
+        if ext:
             extension = ext
         else:
             if 'image/jpeg' in content_type:
@@ -113,9 +128,9 @@ def download_image(post, image_url, output_dir):
                         f.write(chunk)
                         pbar.update(len(chunk))
 
-        logging.info(f"Downloaded image for post ID {post['id']} -> {filename}")
+        logging.getLogger("booru_api").info(f"[booru_api.download_image] Downloaded image for post ID {post['id']} -> {filename}")
 
     except requests.RequestException as e:
-        logging.error(f"Failed to download image for post ID {post['id']}: {e}")
+        logging.getLogger("booru_api").error(f"[booru_api.download_image] Failed to download image for post ID {post['id']}: {e}")
     except Exception as e:
-        logging.error(f"Error saving image for post ID {post['id']}: {e}")
+        logging.getLogger("booru_api").error(f"[booru_api.download_image] Error saving image for post ID {post['id']}: {e}")
