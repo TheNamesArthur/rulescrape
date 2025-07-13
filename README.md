@@ -85,12 +85,12 @@ This helps reduce the appearance of AI-generated content in results—especially
 
 > 🔜 Future updates include:
 > - Improved support for more boorus ([rule34.xxx](https://rule34.xxx) and [safebooru](https://safebooru.org) are currently hardcoded.)
-> - Multi-threaded downloads
-> - Improved organization
-> - Skipping duplicate posts
-> - Enhanced error handling and logging  
-> - Skin/theme support  
-> - Configurable user settings
+> - ~~Multi-threaded downloads~~ (Version 1.2)
+> - ~~Improved organization~~ (Version 1.2)
+> - ~~Skipping duplicate posts~~ (Version 1.2)
+> - ~~Enhanced error handling and logging~~ (Version 1.2)
+> - ~~Skin/theme support~~ (Version 1.2)
+> - ~~Configurable user settings~~ (Version 1.2)
 
 ---
 
