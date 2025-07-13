@@ -1,6 +1,6 @@
 # ![icon](https://i.imgur.com/2IBEmvZ.png)Rulescrape
 
-**Rulescrape** is a Python GUI application for downloading images from booru-style imageboards, specifically [rule34.xxx](https://rule34.xxx) and [safebooru.org](https://safebooru.org). It supports tag-based filtering, optional exclusion of AI-generated content, multi-threaded downloads, duplicate skipping, skin/theme support, and real-time progress tracking.
+**Rulescrape** is a Python GUI application for downloading images from booru-style imageboards. It supports tag-based filtering, optional exclusion of AI-generated content, multi-threaded downloads, duplicate skipping, skin/theme support, and real-time progress tracking.
 
 ---
 
