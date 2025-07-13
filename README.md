@@ -92,10 +92,10 @@ This helps reduce the appearance of AI-generated content in results—especially
 ## 📌 Planned Features
 
 > 🔜 Future updates may include:
-> - Support for additional boorus (currently only rule34 and safebooru)
-> - Further improvements to error handling and progress tracking
-> - More advanced duplicate detection
-> - Additional skin/theme options
+> - ~~Support for additional boorus~~ (Implemented in version 1.2)
+> - ~~Further improvements to error handling and progress tracking~~ (Implemented in version 1.2)
+> - ~~More advanced duplicate detection~~ (Implemented in version 1.2)
+> - ~~Additional skin/theme options~~ (Implemented in version 1.2)
 
 ---
 
