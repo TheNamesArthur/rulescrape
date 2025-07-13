@@ -27,10 +27,6 @@ After downloading the program, simply run the executable file:
 ./rulescrape (Linux)
 ```
 
-```cmd
-rulescrape.exe (Windows)
-```
-
 ### In the GUI:
 
 1. **Select Site** – Choose between `rule34` or `safebooru`
