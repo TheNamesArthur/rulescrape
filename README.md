@@ -19,12 +19,25 @@
 
 ---
 
+## 🖥️ Installation
+
+### Prerequisites
+
+- Python 3.7+
+- `pip` (Python package installer)
+
+### Install dependencies
+
+```bash
+pip install requests tqdm
+```
+
 ## 🚀 Usage
 
 After downloading the program, simply run the executable file:
 
 ```bash
-./rulescrape (Linux)
+python rulescrape_main.py
 ```
 
 ### In the GUI:
