@@ -84,7 +84,7 @@ This helps reduce the appearance of AI-generated content in results—especially
 ## 📌 Planned Features
 
 > 🔜 Future updates include:
-> - Improved support for more boorus ([rule34.xxx](https://rule34.xxx) and [safebooru](https://safebooru.org) are currently hardcoded.)
+> - ~~Improved support for more boorus~~ (Version 1.2 introduces a more modular method of adding boorus.)
 > - ~~Multi-threaded downloads~~ (Version 1.2)
 > - ~~Improved organization~~ (Version 1.2)
 > - ~~Skipping duplicate posts~~ (Version 1.2)
