@@ -285,7 +285,9 @@ def main_gui():
                 logger.info(f"[gui.thread_target] Download task finished in {elapsed:.2f} seconds.")
                 root.after(100, lambda: show_completion_message(valid_images_processed[0]))
                 root.after(100, stop_progress_animation)
-        threading.Thread(target=thread_target).start()
+        t = threading.Thread(target=thread_target)
+        t.daemon = True
+        t.start()
     def show_completion_message(valid_images_processed):
         try:
             messagebox.showinfo("Done", f"Downloaded {valid_images_processed} images from {booru_var.get()}.")
@@ -403,6 +405,10 @@ def main_gui():
             w,
             h
         )
+        try:
+            root.quit()
+        except Exception:
+            pass
         root.destroy()
     skin_files = [f for f in os.listdir(skins_dir) if f.endswith('.json')]
     current_skin_index = 0
