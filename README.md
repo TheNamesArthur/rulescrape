@@ -86,7 +86,7 @@ This helps reduce the appearance of AI-generated content in results—especially
   - Check that your tag is valid and has available content.
 
 - **GUI freezing**  
-  - May be caused by a slow network or server issue.
+  - Normal behavior. Fixed in version 1.2 (currently in beta)
 
 ---
 
