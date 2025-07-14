@@ -26,24 +26,49 @@
 
 ## 🖥️ Installation
 
-### Prerequisites
+### Option 1: Compiled Executable (Recommended for End Users)
 
-- Python 3.7+
-- `pip` (Python package installer)
+#### Requirements
+- Windows or Linux
+- No Python installation needed
 
-### Install dependencies
+#### Steps
+1. Download the compiled executable for your platform (or build it yourself using PyInstaller).
+2. Place the executable in your desired image directory for convenience.
+3. Run it:
+   - Double-click the file
+   - Or launch via terminal:
+     ```sh
+     ./rulescrape
+     ```
 
-```bash
-pip install requests tqdm
-```
+---
+
+### Option 2: Python Source (For Developers and Power Users)
+
+#### Requirements
+- Python 3.13+
+- Recommended: Virtual environment
+
+#### Steps
+1. Install dependencies:
+   ```sh
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+   > If `requirements.txt` is missing, install manually:
+   ```sh
+   pip install requests tqdm
+   ```
+2. Run the script:
+   ```sh
+   python rulescrape.py
+   ```
+
+---
 
 ## 🚀 Usage
-
-After downloading the program, simply run the executable file:
-
-```bash
-python rulescrape_main.py
-```
 
 ### In the GUI:
 
@@ -68,8 +93,6 @@ Or other folder structures depending on the selected organization method.
 
 > **Note:** CLI mode is only available when running the Python file directly (e.g., `python rulescrape.py`).  
 > It is **not** supported in the compiled GUI executable.
-
-You can also run Rulescrape from the command line with argument flags:
 
 ```bash
 python rulescrape.py --cli --booru_type rule34 --tag cat_girl --limit 20 --anti_ai true --multithread --max_workers 8
@@ -104,16 +127,12 @@ This helps reduce the appearance of AI-generated content in results—especially
 
 - **No downloads**  
   - Check that your tag is valid and has available content.
-
-- **GUI freezing**  
-  - Normal behavior. Fixed in version 1.2 (currently in beta)
-
 ---
 
 ## 📌 Planned Features
 
 > 🔜 Future updates may include:
-> - ~~Support for additional boorus~~ (Implemented in version 1.2)
+> - Refactoring code for more modular booru additions.
 > - ~~Further improvements to error handling and progress tracking~~ (Implemented in version 1.2)
 > - ~~More advanced duplicate detection~~ (Implemented in version 1.2)
 > - ~~Additional skin/theme options~~ (Implemented in version 1.2)
