@@ -41,6 +41,7 @@ def load_skin():
                 return skin
             except Exception as e:
                 logging.warning(f"Failed to load skin {fname}: {e}")
+                continue
     return None
 
 class GzTimedRotatingFileHandler(TimedRotatingFileHandler):
@@ -297,20 +298,11 @@ def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method,
         "",
         "[UI]",
         "# Skin/theme file for GUI",
-        f"skin = {skin or 'custom_skin_here.json'}",
+        f"skin = {skin if skin is not None else 'None'}",
         "# GUI window width",
         f"window_width = {window_width}",
         "# GUI window height",
         f"window_height = {window_height}",
-        "",
-        "[Network]",
-        "# Proxy server for downloads. Accepted formats:",
-        "#   - http://host:port",
-        "#   - https://host:port",
-        "#   - http://user:pass@host:port (with authentication)",
-        "#   - https://user:pass@host:port",
-        "#   Leave blank to disable proxy.",
-        f"proxy = {(prev_config['Network'].get('proxy', '') if os.path.exists(CONFIG_FILE) and 'Network' in prev_config else '')}",
         ""
     ]
 
