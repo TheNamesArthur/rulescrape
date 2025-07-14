@@ -16,6 +16,9 @@ def main_gui():
 
     logger = logging.getLogger("gui")
     user_settings = load_user_settings()
+    # Error queue handler for GUI popups (must be after root is defined)
+    import queue
+
     def reload_user_settings():
         nonlocal user_settings, max_workers
         user_settings = load_user_settings()
@@ -27,6 +30,21 @@ def main_gui():
     win_w = user_settings.get('window_width', 400)
     win_h = user_settings.get('window_height', 320)
     root.geometry(f"{win_w}x{win_h}")
+
+    error_queue = queue.Queue()
+    def poll_error_queue():
+        try:
+            while True:
+                msg = error_queue.get_nowait()
+                try:
+                    messagebox.showerror("Error", msg)
+                except Exception:
+                    logger.warning(f"[gui.poll_error_queue] Could not show error popup: {msg}")
+        except queue.Empty:
+            pass
+        root.after(500, poll_error_queue)
+    # Start polling for error messages
+    root.after(500, poll_error_queue)
 
     skin = None
     if user_settings.get('skin'):
@@ -112,6 +130,7 @@ def main_gui():
         save_config_live()
 
     booru_var.bind("<<ComboboxSelected>>", on_booru_selected)
+    # Widget creation
     tag_label = ttk.Label(root, text="Tag:", font=(font_family, font_size))
     tag_entry = tk.Entry(root, bg=entry_bg, fg=entry_fg, insertbackground=fg_color, font=(font_family, font_size))
     tag_entry.insert(0, user_settings.get('tag', 'Enter tag...') or 'Enter tag...')
@@ -159,6 +178,7 @@ def main_gui():
     org_method_dropdown.configure(background=entry_bg, foreground=entry_fg)
     limit_entry.insert(0, str(user_settings.get('limit', 10)))
     progress_label = ttk.Label(root, text="Progress: 0%", font=(font_family, font_size))
+    # Widget grid placement
     org_method_label.grid(row=3, column=0, padx=3, pady=1, sticky="e")
     org_method_dropdown.grid(row=3, column=1, padx=3, pady=1, sticky="w")
     anti_ai_checkbox.grid(row=4, column=0, columnspan=2, padx=3, pady=(2, 0), sticky="n")
@@ -357,6 +377,7 @@ def main_gui():
             limit
         ))
         start_button.config(state="normal")
+    # Only create start_button once, and grid it once
     start_button = tk.Button(
         root,
         text="Start Download",
@@ -364,6 +385,7 @@ def main_gui():
         fg=button_fg,
         activebackground=highlight_color,
         activeforeground=fg_color,
+        font=(font_family, font_size),
         command=start_download
     )
     root.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7), weight=1)
@@ -375,16 +397,6 @@ def main_gui():
     tag_entry.grid(**layout["tag_entry"])
     limit_label.grid(**layout["limit_label"])
     limit_entry.grid(**layout["limit_entry"])
-    start_button = tk.Button(
-        root,
-        text="Start Download",
-        bg=button_bg,
-        fg=button_fg,
-        activebackground=highlight_color,
-        activeforeground=fg_color,
-        font=(font_family, font_size),
-        command=start_download
-    )
     start_button.grid(**layout["start_button"])
     def on_closing():
         current_skin = None

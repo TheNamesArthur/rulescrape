@@ -55,6 +55,15 @@ images/safebooru/<extension>/<tag>/
 Or other folder structures depending on the selected organization method.
 
 ---
+#### CLI Mode
+
+You can also run Rulescrape from the command line with argument flags:
+
+```bash
+python rulescrape.py --cli --booru_type rule34 --tag cat_girl --limit 20 --anti_ai true --multithread --max_workers 8
+```
+
+---
 
 ## 🧠 Anti-AI Tagging
 
