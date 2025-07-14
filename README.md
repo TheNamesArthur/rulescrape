@@ -57,6 +57,9 @@ Or other folder structures depending on the selected organization method.
 ---
 #### CLI Mode
 
+> **Note:** CLI mode is only available when running the Python file directly (e.g., `python rulescrape.py`).  
+> It is **not** supported in the compiled GUI executable.
+
 You can also run Rulescrape from the command line with argument flags:
 
 ```bash
