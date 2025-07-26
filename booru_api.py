@@ -43,32 +43,37 @@ _setup_logging()
 BOORU_APIS = {
     'rule34': {
         'url': "https://api.rule34.xxx/index.php?page=dapi&s=post&q=index",
-        'params': lambda tags, limit: {'tags': tags, 'limit': limit, 'json': 1},
+        'params': lambda tags, limit, pid=0: {'tags': tags, 'limit': limit, 'json': 1, 'pid': pid},
         'headers': {'Accept': 'application/json'},
         'process': lambda data: data
     },
     'safebooru': {
         'url': "https://safebooru.org/index.php?page=dapi&s=post&q=index",
-        'params': lambda tags, limit: {'tags': tags, 'limit': limit, 'json': 1},
+        'params': lambda tags, limit, pid=0: {'tags': tags, 'limit': limit, 'json': 1, 'pid': pid},
         'headers': {'Accept': 'application/json'},
         'process': lambda data: data
     },
     'danbooru': {
         'url': "https://danbooru.donmai.us/posts.json",
-        'params': lambda tags, limit: {'tags': tags or '', 'limit': limit},
+        'params': lambda tags, limit, pid=0: {'tags': tags or '', 'limit': limit, 'page': pid + 1},  # Danbooru uses 1-based pages
         'headers': {'Accept': 'application/json'},
         'process': lambda data: data  # Danbooru returns a list of posts
     },
-    # Add more booru types here
+    'yande.re': {
+        'url': "https://yande.re/post.json",
+        'params': lambda tags, limit, pid=0: {'tags': tags or '', 'limit': limit, 'page': pid + 1},  # Yande.re uses 1-based pages
+        'headers': {'Accept': 'application/json'},
+        'process': lambda data: data  # Yande.re returns a list of posts
+    },
 }
 
-def fetch_booru_posts(booru_type, tags=None, limit=10):
+def fetch_booru_posts(booru_type, tags=None, limit=10, pid=0):
     api = BOORU_APIS.get(booru_type)
     if not api:
         logging.getLogger("booru_api").error(f"[booru_api.fetch_booru_posts] Unsupported booru type: {booru_type}")
         return []
     url = api['url']
-    params = api['params'](tags, limit)
+    params = api['params'](tags, limit, pid)
     headers = api.get('headers', {})
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
