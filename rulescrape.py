@@ -3,7 +3,6 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 import gzip
 import shutil
-from booru_api import fetch_booru_posts, download_image
 import configparser
 import sys
 
@@ -79,6 +78,7 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
         error_queue = gui_error_queue
     except Exception:
         error_queue = None
+    
     # Load user settings
     user_settings = load_user_settings()
     output_dir = os.path.join("images", booru_type)
@@ -86,10 +86,6 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     
     # Get organization method from user settings
     org_method = user_settings.get('org_method', 'By extension and first tag')
-
-    import time
-    max_retries = 5
-    backoff = 2
     
     # Initialize duplication checker and scan existing images
     from dupe_check import get_dupe_checker
@@ -100,256 +96,28 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     scanned_count = dupe_checker.scan_existing_images()
     logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Scanned {scanned_count} existing images for duplicate detection")
 
-    downloaded_files = set()
-    valid_images_processed = 0
-    duplicates_in_session = 0  # Track duplicates found during this session
+    # Use the unified download module
+    from download import run_download
     
-    # Helper function to get destination directory based on organization method
-    def get_dest_dir(post):
-        image_url = post.get('file_url', '')
-        ext = os.path.splitext(image_url.split('?')[0])[1].lower().replace('.', '')
-        if ext not in ["jpg", "jpeg", "png", "gif", "webm", "mp4", "bmp", "svg"]:
-            ext = "other"
-        
-        # Get tags - handle different booru tag formats
-        if booru_type == "danbooru":
-            tags = post.get('tag_string', '')
-            tag_list = tags.split() if isinstance(tags, str) else []
-        else:
-            tags = post.get('tags', '')
-            tag_list = tags.split() if isinstance(tags, str) else []
-        
-        if org_method == "By extension and first tag":
-            return os.path.join(output_dir, ext, tag_list[0] if tag_list else "untagged")
-        elif org_method == "By extension only":
-            return os.path.join(output_dir, ext)
-        elif org_method == "Flat (no folders)":
-            return output_dir
-        elif org_method == "By tag only":
-            return os.path.join(output_dir, tag_list[0] if tag_list else "untagged")
-        else:
-            return os.path.join(output_dir, ext, tag_list[0] if tag_list else "untagged")
+    success = run_download(
+        booru_type=booru_type,
+        tag=tag,
+        limit=limit,
+        output_dir=output_dir,
+        org_method=org_method,
+        dupe_checker=dupe_checker,
+        multithread=multithread,
+        max_workers=max_workers,
+        error_queue=error_queue
+    )
     
-    # We'll keep fetching more posts until we get the required number of unique images
-    posts_fetched = 0
-    fetch_limit = min(limit * 2, 1000)  # Start by fetching 2x the limit, but respect API limits
-    max_fetch_attempts = 20  # Allow more attempts for high limits
-    current_page = 0  # Track pagination for APIs that support it
-    
-    while valid_images_processed < limit and posts_fetched < max_fetch_attempts:
-        attempt = 0
-        posts = None
-        
-        # Fetch posts with retry logic
-        while attempt < max_retries:
-            try:
-                # Use full API limit for Rule34 (1000), smaller limits for others
-                if booru_type == "rule34":
-                    current_limit = min(fetch_limit, 1000)  # Rule34 supports up to 1000 posts per request
-                else:
-                    current_limit = min(fetch_limit, 100)   # Conservative limit for other APIs
-                posts = fetch_booru_posts(booru_type, tags=tag, limit=current_limit, pid=current_page)
-                break
-            except Exception as e:
-                err_str = str(e).lower()
-                if ("429" in err_str or "rate limit" in err_str or "422" in err_str) and booru_type == "danbooru":
-                    wait_time = backoff ** attempt
-                    msg = f"Rate limit encountered ({e}). Retrying in {wait_time} seconds. Attempt {attempt+1}/{max_retries}."
-                    logging.getLogger("rulescrape").warning(f"[rulescrape.run_script] {msg}")
-                    logging.getLogger("gui").warning(f"[gui.rate_limit] {msg}")
-                    if error_queue:
-                        error_queue.put(msg)
-                    time.sleep(wait_time)
-                    attempt += 1
-                    continue
-                else:
-                    msg = f"Error fetching posts from {booru_type}: {e}"
-                    logging.getLogger("rulescrape").error(f"[rulescrape.run_script] {msg}")
-                    if error_queue:
-                        error_queue.put(msg)
-                    return
-                    
-        if posts is None:
-            msg = f"Failed to fetch posts from {booru_type} after {max_retries} retries due to rate limiting or errors."
-            logging.getLogger("rulescrape").error(f"[rulescrape.run_script] {msg}")
-            logging.getLogger("gui").error(f"[gui.rate_limit] {msg}")
-            if error_queue:
-                error_queue.put(msg)
-            return
-
-        if not posts:
-            msg = f"No posts returned from {booru_type} for tag '{tag}' and limit {current_limit}. Possible reasons: no results, API error, or invalid query."
-            logging.getLogger("rulescrape").warning(f"[rulescrape.run_script] {msg}")
-            if error_queue:
-                error_queue.put(msg)
-            return
-        
-        posts_fetched += 1
-        posts_to_process = list(posts)  # Convert to list for easier manipulation
-
-        def process_post(post):
-            image_url = post.get('file_url')
-            if not image_url or not image_url.startswith(('http://', 'https://')):
-                msg = f"Skipping invalid post: {post}"
-                logging.getLogger("rulescrape").warning(f"[rulescrape.run_script] {msg}")
-                if error_queue:
-                    error_queue.put(msg)
-                return False
-
-            # Get the proper destination directory based on organization method
-            dest_dir = get_dest_dir(post)
-            os.makedirs(dest_dir, exist_ok=True)
-            
-            filename_part = image_url.split('/')[-1].split('?')[0]
-            _, ext = os.path.splitext(filename_part)
-            filename = os.path.join(dest_dir, f"post_{post['id']}{ext if ext else '.jpg'}")
-
-            # Check if file already exists - if so, check if it's a duplicate
-            if os.path.exists(filename):
-                if dupe_checker.is_duplicate(filename):
-                    msg = f"Duplicate image already exists, skipping: {filename}"
-                    logging.getLogger("rulescrape").info(f"[rulescrape.run_script] {msg}")
-                    if error_queue:
-                        error_queue.put(msg)
-                    return "duplicate"
-                else:
-                    # File exists but isn't in our hash cache - this shouldn't happen but let's be safe
-                    msg = f"File exists but not recognized as duplicate, re-downloading: {filename}"
-                    logging.getLogger("rulescrape").warning(f"[rulescrape.run_script] {msg}")
-
-            temp_filename = filename + ".tmp"
-            success = False
-            try:
-                download_image(post, image_url, dest_dir)
-                if os.path.exists(filename) and os.path.getsize(filename) > 0:
-                    os.rename(filename, temp_filename)
-                    
-                    # Check for duplicates using the new duplication checker
-                    if dupe_checker.is_duplicate(temp_filename):
-                        msg = f"Duplicate image detected after download, skipping: {filename}"
-                        logging.getLogger("rulescrape").info(f"[rulescrape.run_script] {msg}")
-                        if error_queue:
-                            error_queue.put(msg)
-                        os.remove(temp_filename)
-                        return "duplicate"
-                    else:
-                        # Not a duplicate, keep the file
-                        os.rename(temp_filename, filename)
-                        success = True
-            except Exception as e:
-                msg = f"Error downloading image from {image_url}: {e}"
-                logging.getLogger("rulescrape").error(f"[rulescrape.run_script] {msg}")
-                if error_queue:
-                    error_queue.put(msg)
-                if os.path.exists(temp_filename):
-                    os.remove(temp_filename)
-                return False
-
-            if success:
-                downloaded_files.add(filename)
-                return "success"
-            return "error"
-
-        # Process posts until we reach the desired limit
-        if multithread:
-            import concurrent.futures
-            from threading import Lock
-            progress_lock = Lock()  # Add lock for thread-safe progress tracking
-            workers = max_workers if max_workers is not None else os.cpu_count() // 2 or 1
-            logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Using multithreaded download with {workers} workers.")
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                post_index = 0
-                active_futures = {}
-                
-                # Continue processing posts until we reach the limit
-                while valid_images_processed < limit and post_index < len(posts_to_process):
-                    # Submit new posts while we have worker capacity and haven't reached limit
-                    while len(active_futures) < workers and post_index < len(posts_to_process) and valid_images_processed < limit:
-                        future = executor.submit(process_post, posts_to_process[post_index])
-                        active_futures[future] = post_index
-                        post_index += 1
-                    
-                    # Check for completed downloads
-                    if active_futures:
-                        # Wait for at least one to complete
-                        done_futures = concurrent.futures.as_completed(active_futures.keys(), timeout=1)
-                        try:
-                            for future in done_futures:
-                                result = future.result()
-                                if result == "success":
-                                    with progress_lock:  # Thread-safe increment
-                                        valid_images_processed += 1
-                                        current_count = valid_images_processed
-                                    logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Downloaded {current_count}/{limit} unique images")
-                                elif result == "duplicate":
-                                    with progress_lock:  # Thread-safe increment
-                                        duplicates_in_session += 1
-                                
-                                # Remove completed future
-                                del active_futures[future]
-                                
-                                # Stop if we've reached our limit
-                                if valid_images_processed >= limit:
-                                    break
-                        except concurrent.futures.TimeoutError:
-                            # No futures completed in timeout, continue
-                            pass
-                
-                # Wait for any remaining active futures to complete, but don't count towards limit
-                for future in active_futures:
-                    try:
-                        result = future.result(timeout=5)  # Wait up to 5 seconds for cleanup
-                        if result == "duplicate":
-                            with progress_lock:
-                                duplicates_in_session += 1
-                    except:
-                        pass
-                        
-                # Check if we processed all posts in this batch but haven't reached the limit
-                # If so, the outer loop will fetch more posts from the next page
-        else:
-            for post in posts_to_process:
-                if valid_images_processed >= limit:
-                    logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Reached limit of {limit} valid images. Stopping.")
-                    break
-                result = process_post(post)
-                if result == "success":
-                    valid_images_processed += 1
-                    logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Downloaded {valid_images_processed}/{limit} unique images")
-                elif result == "duplicate":
-                    duplicates_in_session += 1
-        
-        # If we've reached our target, break out of the fetch loop
-        if valid_images_processed >= limit:
-            break
-            
-        # If we haven't gotten enough unique images, try fetching more
-        if valid_images_processed < limit:
-            remaining_needed = limit - valid_images_processed
-            
-            # Be more aggressive with fetch limit if we're seeing many duplicates
-            if duplicates_in_session > remaining_needed:
-                # High duplicate rate - fetch much more
-                if booru_type == "rule34":
-                    fetch_limit = min(remaining_needed * 5, 1000)  # Use Rule34's full API limit
-                else:
-                    fetch_limit = max(remaining_needed * 5, 100)
-            else:
-                # Normal duplicate rate - fetch 2x what we need
-                if booru_type == "rule34":
-                    fetch_limit = min(remaining_needed * 2, 1000)  # Use Rule34's full API limit
-                else:
-                    fetch_limit = max(remaining_needed * 2, 20)
-                
-            current_page += 1  # Move to next page to get different posts
-            logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Need {remaining_needed} more unique images, fetching {fetch_limit} more posts from page {current_page}... (duplicates so far: {duplicates_in_session})")
-
     # Log duplication summary
     dupe_checker.log_session_summary()
-    duplicates_found = dupe_checker.get_duplicate_count()
     
-    logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Download completed: {valid_images_processed} new images downloaded, {duplicates_found} duplicates skipped from {booru_type}.")
+    if not success:
+        logging.getLogger("rulescrape").error(f"[rulescrape.run_script] Download failed.")
+    
+    return success
 
 def load_user_settings():
     import multiprocessing

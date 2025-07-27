@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
 import json
-from booru_api import fetch_booru_posts, download_image
 import configparser
 import sys
 
@@ -223,256 +222,117 @@ def main_gui():
             progress_label.config(text=f"Progress: {percent}%")
     download_in_progress = [False]
     def run_script_with_progress(booru_type, tag, limit):
-        import concurrent.futures
-        from threading import Lock
+        """Use the unified download module for GUI downloads."""
         download_in_progress[0] = True
         progress_bar.grid()
         progress_label.grid()
         if progress_animation_colors:
             start_progress_animation()
+            
+        # Get settings
         output_dir = os.path.join("images", booru_type)
         os.makedirs(output_dir, exist_ok=True)
         org_method = org_method_var.get() if 'org_method_var' in locals() else "By extension and first tag"
         use_multithread = multithread_var.get() if 'multithread_var' in locals() else False
-        
+
         # Initialize duplication checker
         from dupe_check import get_dupe_checker
         dupe_checker = get_dupe_checker("images")
         dupe_checker.reset_duplicate_count()
-        
-        def get_dest_dir(post):
-            image_url = post.get('file_url')
-            ext = os.path.splitext(image_url.split('?')[0])[1].lower().replace('.', '')
-            if ext not in ["jpg", "jpeg", "png", "gif", "webm", "mp4", "bmp", "svg", "other"]:
-                ext = "other"
-            # Use correct tag field for Danbooru
-            if booru_var.get() == "danbooru":
-                tags = post.get('tag_string', '')
-                tag_list = tags.split() if isinstance(tags, str) else []
-            else:
-                tags = post.get('tags', '')
-                tag_list = tags.split() if isinstance(tags, str) else []
-            if org_method == "By extension and first tag":
-                return os.path.join(output_dir, ext, tag_list[0] if tag_list else "untagged")
-            elif org_method == "By extension only":
-                return os.path.join(output_dir, ext)
-            elif org_method == "Flat (no folders)":
-                return output_dir
-            elif org_method == "By tag only":
-                return os.path.join(output_dir, tag_list[0] if tag_list else "untagged")
-            else:
-                return os.path.join(output_dir, ext, tag_list[0] if tag_list else "untagged")
-        progress_lock = Lock()
-        valid_images_processed = [0]  # Use list for mutability in threads
-        posts_processed = [0]  # Track total posts processed (including duplicates)
-        
-        def update_progress_safely():
-            """Centralized progress update function"""
-            with progress_lock:
-                current_valid = valid_images_processed[0]
-                current_processed = posts_processed[0]
-            
-            # Calculate progress based on images downloaded vs target
-            if limit > 0:
-                percent = min(100, int((current_valid / limit) * 100))
-                root.after(0, lambda: progress_var.set(percent))
-                root.after(0, lambda: progress_label.config(text=f"Progress: {percent}% ({current_valid}/{limit} images, {current_processed} processed)"))
-        
-        def download_one(post):
-            nonlocal posts_processed, valid_images_processed
-            image_url = post.get('file_url')
-            if not image_url or not image_url.startswith(('http://', 'https://')):
-                logger.warning(f"[gui.download_one] Skipping invalid post: {post}")
-                return False
-            dest_dir = get_dest_dir(post)
-            os.makedirs(dest_dir, exist_ok=True)
-            
-            # Create filename for this download
-            filename_part = image_url.split('/')[-1].split('?')[0]
-            _, ext = os.path.splitext(filename_part)
-            filename = os.path.join(dest_dir, f"post_{post['id']}{ext if ext else '.jpg'}")
+        scanned_count = dupe_checker.scan_existing_images()
+        logger.info(f"[gui.run_script_with_progress] Scanned {scanned_count} existing images")
 
-            # Check if file already exists - if so, check if it's a duplicate
-            if os.path.exists(filename):
-                if dupe_checker.is_duplicate(filename):
-                    logger.info(f"[gui.download_one] Duplicate image already exists, skipping: {filename}")
-                    with progress_lock:
-                        posts_processed[0] += 1
-                    update_progress_safely()
-                    return "duplicate"
-                else:
-                    # File exists but isn't in our hash cache - this shouldn't happen but let's be safe
-                    logger.warning(f"[gui.download_one] File exists but not recognized as duplicate, re-downloading: {filename}")
-
-            temp_filename = filename + ".tmp"
-            
-            logger.info(f"[gui.download_one] Downloading {image_url} to {dest_dir}")
-            try:
-                download_image(post, image_url, dest_dir)
-                
-                # Check if the file was downloaded successfully
-                if os.path.exists(filename) and os.path.getsize(filename) > 0:
-                    # Move to temp file for duplicate checking
-                    os.rename(filename, temp_filename)
-                    
-                    # Check for duplicates using the new duplication checker
-                    if dupe_checker.is_duplicate(temp_filename):
-                        logger.info(f"[gui.download_one] Duplicate image detected after download, skipping: {filename}")
-                        os.remove(temp_filename)
-                        with progress_lock:
-                            posts_processed[0] += 1
-                        update_progress_safely()
-                        return "duplicate"
-                    else:
-                        # Not a duplicate, keep the file
-                        os.rename(temp_filename, filename)
-                        with progress_lock:
-                            valid_images_processed[0] += 1
-                            posts_processed[0] += 1
-                        update_progress_safely()
-                        return "success"
-                else:
-                    logger.warning(f"[gui.download_one] Downloaded file is empty or doesn't exist: {filename}")
-                    with progress_lock:
-                        posts_processed[0] += 1
-                    update_progress_safely()
-                    return "error"
-            except Exception as e:
-                logger.error(f"[gui.download_one] Error downloading {image_url}: {e}")
-                if os.path.exists(temp_filename):
-                    os.remove(temp_filename)
-                with progress_lock:
-                    posts_processed[0] += 1
-                update_progress_safely()
-                return "error"
         def thread_target():
+            """Execute download in background thread."""
             import time
             start_time = time.time()
+            valid_images_processed = 0
+            
             try:
-                # Scan existing images before starting download
-                logger.info(f"[gui.thread_target] Scanning existing images for duplicate detection...")
-                scanned_count = dupe_checker.scan_existing_images()
-                logger.info(f"[gui.thread_target] Scanned {scanned_count} existing images")
+                # Use the unified download module
+                from download import run_download
                 
-                # Pagination support for getting unique images
-                current_page = 0
-                max_fetch_attempts = 20  # Allow more attempts for high limits (matches CLI)
-                fetch_limit = min(limit * 2, 1000)  # Start by fetching 2x the limit, but respect API limits
-                posts_fetched = 0
+                # Create a custom progress callback for GUI integration
+                class GUIProgressManager:
+                    def __init__(self):
+                        self.processed = 0
+                        self.duplicates = 0
+                        
+                    def update_progress(self, processed, duplicates_found):
+                        self.processed = processed
+                        self.duplicates = duplicates_found
+                        
+                        # Update GUI progress
+                        if limit > 0:
+                            percent = min(100, int((processed / limit) * 100))
+                            root.after(0, lambda: progress_var.set(percent))
+                            root.after(0, lambda: progress_label.config(
+                                text=f"Progress: {percent}% ({processed}/{limit} images, {duplicates_found} duplicates skipped)"
+                            ))
                 
-                while valid_images_processed[0] < limit and posts_fetched < max_fetch_attempts:
-                    try:
-                        # Use full API limit for Rule34 (1000), smaller limits for others (matches CLI)
-                        if booru_type == "rule34":
-                            current_limit = min(fetch_limit, 1000)  # Rule34 supports up to 1000 posts per request
-                        else:
-                            current_limit = min(fetch_limit, 100)   # Conservative limit for other APIs
-                        posts = fetch_booru_posts(booru_type, tags=tag, limit=current_limit, pid=current_page)
+                # Create a simplified progress manager for this download
+                progress_mgr = GUIProgressManager()
+                
+                # Override the download manager's log_message to provide progress updates
+                original_log_message = None
+                
+                def gui_log_message_wrapper(original_method):
+                    def wrapper(self, level, message):
+                        # Call original logging
+                        original_method(self, level, message)
                         
-                        if not posts:
-                            logger.warning(f"[gui.thread_target] No posts returned from {booru_type} for tag '{tag}' and limit {current_limit}.")
-                            break
-                            
-                        posts_fetched += 1
-                        # Initial progress update for this batch
-                        update_progress_safely()
-                        
-                        # Track how many images we had before this batch
-                        images_before_batch = valid_images_processed[0]
-                        
-                        if use_multithread:
-                            logger.info(f"[gui.thread_target] Starting multi-threaded download with {max_workers} workers for page {current_page}.")
-                            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                                post_index = 0
-                                active_futures = {}
-                                
-                                # Process posts until we reach the limit
-                                while valid_images_processed[0] < limit and post_index < len(posts):
-                                    # Submit new posts while we have worker capacity
-                                    while len(active_futures) < max_workers and post_index < len(posts) and valid_images_processed[0] < limit:
-                                        future = executor.submit(download_one, posts[post_index])
-                                        active_futures[future] = post_index
-                                        post_index += 1
-                                    
-                                    # Check for completed downloads
-                                    if active_futures:
-                                        done_futures = concurrent.futures.as_completed(active_futures.keys(), timeout=1)
-                                        try:
-                                            for future in done_futures:
-                                                result = future.result()  # Get the result to check if download was successful
-                                                del active_futures[future]
-                                                
-                                                # Check current progress with thread safety
-                                                with progress_lock:
-                                                    current_progress = valid_images_processed[0]
-                                                
-                                                # Stop if we've reached our limit
-                                                if current_progress >= limit:
-                                                    break
-                                        except concurrent.futures.TimeoutError:
-                                            pass
-                                
-                                # Wait for any remaining active futures to complete
-                                for future in active_futures:
-                                    try:
-                                        future.result(timeout=5)
-                                    except:
-                                        pass
-                        else:
-                            for post in posts:
-                                if valid_images_processed[0] >= limit:
-                                    break
-                                download_one(post)
-                        
-                        # If we've reached our target, break out of the fetch loop
-                        if valid_images_processed[0] >= limit:
-                            break
-                            
-                        # If we haven't gotten enough unique images, try fetching more from next page
-                        if valid_images_processed[0] < limit:
-                            remaining_needed = limit - valid_images_processed[0]
-                            
-                            # Get current duplicate count for intelligent batching
-                            duplicates_found = dupe_checker.get_duplicate_count()
-                            
-                            # Be more aggressive with fetch limit if we're seeing many duplicates
-                            if duplicates_found > remaining_needed:
-                                # High duplicate rate - fetch much more
-                                if booru_type == "rule34":
-                                    fetch_limit = min(remaining_needed * 5, 1000)  # Use Rule34's full API limit
-                                else:
-                                    fetch_limit = max(remaining_needed * 5, 100)
-                            else:
-                                # Normal duplicate rate - fetch 2x what we need
-                                if booru_type == "rule34":
-                                    fetch_limit = min(remaining_needed * 2, 1000)  # Use Rule34's full API limit
-                                else:
-                                    fetch_limit = max(remaining_needed * 2, 20)
-                            
-                            current_page += 1  # Move to next page to get different posts
-                            logger.info(f"[gui.thread_target] Need {remaining_needed} more unique images, fetching {fetch_limit} more posts from page {current_page}... (duplicates so far: {duplicates_found})")
+                        # Extract progress information from log messages
+                        if "Downloaded " in message and "/" in message:
+                            try:
+                                # Parse "Downloaded X/Y unique images" messages
+                                parts = message.split("Downloaded ")[1].split("/")
+                                if len(parts) >= 2:
+                                    current = int(parts[0])
+                                    duplicates = dupe_checker.get_duplicate_count()
+                                    progress_mgr.update_progress(current, duplicates)
+                            except:
+                                pass  # Ignore parsing errors
+                    return wrapper
+                
+                # Monkey patch the download manager's log_message method
+                from download import DownloadManager
+                original_log_method = DownloadManager.log_message
+                DownloadManager.log_message = lambda self, level, msg: gui_log_message_wrapper(original_log_method)(self, level, msg)
+                
+                try:
+                    # Run the unified download
+                    success = run_download(
+                        booru_type=booru_type,
+                        tag=tag,
+                        limit=limit,
+                        output_dir=output_dir,
+                        org_method=org_method,
+                        dupe_checker=dupe_checker,
+                        multithread=use_multithread,
+                        max_workers=max_workers,
+                        error_queue=error_queue
+                    )
                     
-                    except Exception as e:
-                        logger.error(f"[gui.thread_target] Error fetching posts from page {current_page}: {e}")
-                        break
-                            
-                # Log duplication summary
-                duplicates_found = dupe_checker.get_duplicate_count()
-                final_processed = posts_processed[0]
-                final_valid = valid_images_processed[0]
-                logger.info(f"[gui.thread_target] Download completed: {final_valid} new images, {duplicates_found} duplicates skipped, {final_processed} total posts processed")
-                dupe_checker.log_session_summary()
-                
+                    valid_images_processed = progress_mgr.processed
+                    
+                    if success:
+                        logger.info(f"[gui.thread_target] Download completed successfully: {valid_images_processed} images")
+                    else:
+                        logger.warning(f"[gui.thread_target] Download completed with issues: {valid_images_processed} images")
+                        
+                finally:
+                    # Restore original method
+                    DownloadManager.log_message = original_log_method
+                    
             except Exception as e:
                 logger.error(f"[gui.thread_target] Error during download: {e}")
-                # Final progress update
-                update_progress_safely()
-                root.after(100, lambda: show_completion_message(valid_images_processed[0]))
+                valid_images_processed = progress_mgr.processed if 'progress_mgr' in locals() else 0
             finally:
                 elapsed = time.time() - start_time
                 logger.info(f"[gui.thread_target] Download task finished in {elapsed:.2f} seconds.")
-                root.after(100, lambda: show_completion_message(valid_images_processed[0]))
+                root.after(100, lambda: show_completion_message(valid_images_processed))
                 root.after(100, stop_progress_animation)
+        
         t = threading.Thread(target=thread_target)
         t.daemon = True
         t.start()
