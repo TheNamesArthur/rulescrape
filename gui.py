@@ -4,8 +4,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import logging
 import json
-import configparser
-import sys
 
 # These should be imported from rulescrape.py if needed
 from rulescrape import load_user_settings, save_user_settings, skins_dir
