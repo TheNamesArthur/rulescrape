@@ -22,7 +22,7 @@
 
 ## 📸 Screenshot
 
-![Screenshot of the Tkinter GUI](https://i.imgur.com/Z2QOQRe.png)
+![Screenshot of the Tkinter GUI](https://i.imgur.com/tUh4nVe.png)
 
 ---
 
