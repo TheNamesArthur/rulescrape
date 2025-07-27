@@ -228,14 +228,15 @@ def main_gui():
             start_progress_animation()
             
         # Get settings
-        output_dir = os.path.join("images", booru_type)
+        user_settings = load_user_settings()
+        output_dir = os.path.join(user_settings.get('output_dir', 'images'), booru_type)
         os.makedirs(output_dir, exist_ok=True)
         org_method = org_method_var.get() if 'org_method_var' in locals() else "By extension and first tag"
         use_multithread = multithread_var.get() if 'multithread_var' in locals() else False
 
         # Initialize duplication checker
         from dupe_check import get_dupe_checker
-        dupe_checker = get_dupe_checker("images")
+        dupe_checker = get_dupe_checker(user_settings.get('output_dir', 'images'))
         dupe_checker.reset_duplicate_count()
         scanned_count = dupe_checker.scan_existing_images()
         logger.info(f"[gui.run_script_with_progress] Scanned {scanned_count} existing images")
@@ -372,6 +373,8 @@ def main_gui():
             current_skin = user_settings['skin']
         w = root.winfo_width() if root.winfo_exists() else 400
         h = root.winfo_height() if root.winfo_exists() else 320
+        # Reload user settings to get current output_dir from config
+        current_settings = load_user_settings()
         save_user_settings(
             booru_var.get(),
             tag_val,
@@ -379,6 +382,7 @@ def main_gui():
             anti_ai_var.get(),
             multithread_var.get(),
             org_method_var.get(),
+            current_settings.get('output_dir', 'images'),
             current_skin,
             w,
             h
@@ -442,6 +446,8 @@ def main_gui():
             current_skin = user_settings['skin']
         w = root.winfo_width() if root.winfo_exists() else 400
         h = root.winfo_height() if root.winfo_exists() else 320
+        # Reload user settings to get current output_dir from config
+        current_settings = load_user_settings()
         save_user_settings(
             booru_var.get(),
             tag_entry.get(),
@@ -449,6 +455,7 @@ def main_gui():
             anti_ai_var.get(),
             multithread_var.get(),
             org_method_var.get(),
+            current_settings.get('output_dir', 'images'),
             current_skin,
             w,
             h

@@ -81,7 +81,7 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     
     # Load user settings
     user_settings = load_user_settings()
-    output_dir = os.path.join("images", booru_type)
+    output_dir = os.path.join(user_settings.get('output_dir', 'images'), booru_type)
     os.makedirs(output_dir, exist_ok=True)
     
     # Get organization method from user settings
@@ -89,7 +89,7 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     
     # Initialize duplication checker and scan existing images
     from dupe_check import get_dupe_checker
-    dupe_checker = get_dupe_checker("images")
+    dupe_checker = get_dupe_checker(user_settings.get('output_dir', 'images'))
     
     # Scan existing images before starting download
     dupe_checker.reset_duplicate_count()
@@ -132,6 +132,7 @@ def load_user_settings():
         'multithread': False,
         'org_method': 'By extension and first tag',
         'max_workers': default_workers,
+        'output_dir': 'images',
         'skin': None,
         'window_width': 400,
         'window_height': 320
@@ -147,6 +148,7 @@ def load_user_settings():
             settings['multithread'] = config['Settings'].getboolean('multithread', settings['multithread'])
             settings['org_method'] = config['Settings'].get('org_method', settings['org_method'])
             settings['max_workers'] = config['Settings'].getint('max_workers', settings['max_workers'])
+            settings['output_dir'] = config['Settings'].get('output_dir', settings['output_dir'])
         if 'UI' in config:
             settings['skin'] = config['UI'].get('skin', settings['skin'])
             settings['window_width'] = config['UI'].getint('window_width', settings['window_width'])
@@ -155,7 +157,7 @@ def load_user_settings():
     return default_settings
 
 
-def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method, skin=None, window_width=400, window_height=320):
+def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method, output_dir='images', skin=None, window_width=400, window_height=320):
     # Always update config file with latest settings
     import configparser
     config = configparser.ConfigParser()
@@ -187,6 +189,8 @@ def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method,
         f"multithread = {multithread}",
         "# Organization method for images",
         f"org_method = {org_method}",
+        "# Custom output directory for images (default: images)",
+        f"output_dir = {output_dir}",
         "# Number of threads for multithreaded downloads",
         f"max_workers = {prev_max_workers}",
         "",
@@ -240,6 +244,7 @@ if __name__ == "__main__":
             anti_ai = settings.get('anti_ai', False)
         multithread = args.multithread if args.multithread else settings.get('multithread', False)
         org_method = args.org_method or settings.get('org_method', 'By extension and first tag')
+        output_dir = settings.get('output_dir', 'images')
         skin = args.skin or settings.get('skin', None)
         window_width = args.window_width if args.window_width is not None else settings.get('window_width', 400)
         window_height = args.window_height if args.window_height is not None else settings.get('window_height', 320)
@@ -247,7 +252,7 @@ if __name__ == "__main__":
 
         # Save settings for future GUI use
         save_user_settings(
-            booru_type, tag, limit, anti_ai, multithread, org_method,
+            booru_type, tag, limit, anti_ai, multithread, org_method, output_dir,
             skin=skin, window_width=window_width, window_height=window_height
         )
         # If max_workers is specified, update config file directly
