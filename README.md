@@ -178,8 +178,8 @@ This helps reduce the appearance of AI-generated content in results—especially
 
 #### 📊 **Statistics**
 - **1,282 lines added, 391 lines removed** across 7 files (main → V1.5)
-- **New Files**: `download.py` (+382 lines), `dupe_check.py` (+181 lines)  
-- **Major Enhancements**: `gui.py` (+431/-154), `booru_api.py` (+97/-63), `rulescrape.py` (+114/-151)
+- **New Files**: `download.py`, `dupe_check.py` 
+- **Major Enhancements**: `gui.py`, `booru_api.py`, `rulescrape.py`
 - **Total V1.5 Codebase**: 1,855 lines across 5 core Python files
 
 ### Differences from Main Branch:
