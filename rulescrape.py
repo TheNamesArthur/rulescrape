@@ -1,17 +1,35 @@
+"""
+Rulescrape: Download images from booru-style imageboards.
+
+This module provides both CLI and GUI interfaces for downloading images from various
+booru sites including rule34, safebooru, danbooru, and yande.re. Features include
+tag-based filtering, duplicate detection, multi-threaded downloads, and theme support.
+"""
+
 import os
-import logging
-from logging.handlers import TimedRotatingFileHandler
+import sys
+import json
 import gzip
 import shutil
+import logging
+import argparse
 import configparser
-import sys
+import multiprocessing
+from logging.handlers import TimedRotatingFileHandler
 
 
 def get_base_path():
+    """
+    Get the base path for the application (handles both script and frozen executable).
+    
+    Returns:
+        str: Base directory path for the application
+    """
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
+# Application configuration
 script_dir = get_base_path()
 log_dir = os.path.join("logs")
 os.makedirs(log_dir, exist_ok=True)
@@ -20,14 +38,17 @@ log_file = os.path.join(log_dir, "rulescrape.log")
 # Config file for user settings
 CONFIG_FILE = os.path.join('user_settings.config')
 
-
 # Skins support: create skins folder if not exists
 skins_dir = os.path.join("skins")
 os.makedirs(skins_dir, exist_ok=True)
 
-# Skins loader: returns a dict with color/layout overrides if a skin is found
-import json
 def load_skin():
+    """
+    Load skin configuration from JSON files in skins directory.
+    
+    Returns:
+        dict or None: Skin configuration dictionary or None if no skin found
+    """
     # Look for any .json file in skins_dir
     for fname in os.listdir(skins_dir):
         if fname.endswith('.json'):
@@ -43,7 +64,16 @@ def load_skin():
     return None
 
 class GzTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """
+    Custom TimedRotatingFileHandler that automatically compresses rotated log files.
+    
+    This handler extends the standard TimedRotatingFileHandler to automatically
+    compress rotated log files using gzip, saving disk space while maintaining
+    log history.
+    """
+    
     def doRollover(self):
+        """Perform log rollover and compress the rotated file."""
         super().doRollover()
         # Compress the most recent rotated log file
         import glob
@@ -70,6 +100,19 @@ for h in logger.handlers[:]:
 logger.addHandler(handler)
 
 def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
+    """
+    Run the image download script with specified parameters.
+    
+    Args:
+        booru_type (str): Type of booru site (e.g., 'rule34', 'danbooru')
+        tag (str): Tag to search for
+        limit (int): Maximum number of images to download
+        multithread (bool): Whether to use multi-threaded downloads
+        max_workers (int, optional): Number of worker threads
+        
+    Returns:
+        bool: True if download completed successfully, False otherwise
+    """
     # Error feedback for GUI
     import queue
     error_queue = None
@@ -120,6 +163,12 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     return success
 
 def load_user_settings():
+    """
+    Load user settings from configuration file.
+    
+    Returns:
+        dict: Dictionary containing user settings with defaults for missing values
+    """
     import multiprocessing
     cpu_threads = multiprocessing.cpu_count()
     default_workers = max(1, cpu_threads // 2)
@@ -158,6 +207,21 @@ def load_user_settings():
 
 
 def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method, output_dir='images', skin=None, window_width=400, window_height=320):
+    """
+    Save user settings to configuration file.
+    
+    Args:
+        booru_type (str): Type of booru site
+        tag (str): Search tag
+        limit (int): Download limit
+        anti_ai (bool): Whether to exclude AI content
+        multithread (bool): Whether to use multi-threading
+        org_method (str): File organization method
+        output_dir (str): Output directory for images
+        skin (str, optional): Skin file name
+        window_width (int): GUI window width
+        window_height (int): GUI window height
+    """
     # Always update config file with latest settings
     import configparser
     config = configparser.ConfigParser()

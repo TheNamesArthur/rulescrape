@@ -4,23 +4,41 @@ Handles both CLI and GUI downloads with consistent behavior.
 """
 
 import os
+import time
 import logging
 import concurrent.futures
 from threading import Lock
+
 from booru_api import fetch_booru_posts, download_image
 
 
 class DownloadManager:
-    """Manages image downloads with support for both single-threaded and multi-threaded operations."""
+    """
+    Manages image downloads with support for both single-threaded and multi-threaded operations.
+    
+    Attributes:
+        booru_type: Type of booru site to download from
+        tag: Search tag for filtering images
+        limit: Maximum number of images to download
+        output_dir: Directory to save downloaded images
+        org_method: Organization method for file structure
+        dupe_checker: Instance for duplicate detection
+        multithread: Whether to use multi-threaded downloads
+        max_workers: Number of worker threads for multi-threaded downloads
+        error_queue: Queue for error messages (GUI integration)
+    """
     
     def __init__(self, booru_type, tag, limit, output_dir, org_method, dupe_checker, 
                  multithread=False, max_workers=None, error_queue=None):
+        # Basic configuration
         self.booru_type = booru_type
         self.tag = tag
         self.limit = limit
         self.output_dir = output_dir
         self.org_method = org_method
         self.dupe_checker = dupe_checker
+        
+        # Threading configuration
         self.multithread = multithread
         self.max_workers = max_workers if max_workers is not None else os.cpu_count() // 2 or 1
         self.error_queue = error_queue
@@ -31,7 +49,7 @@ class DownloadManager:
         self.downloaded_files = set()
         self.progress_lock = Lock()
         
-        # Fetch control
+        # Fetch control parameters
         self.posts_fetched = 0
         self.max_fetch_attempts = 20
         self.current_page = 0
@@ -39,7 +57,13 @@ class DownloadManager:
         self.backoff = 2
         
     def log_message(self, level, message):
-        """Log a message and optionally send to error queue."""
+        """
+        Log a message and optionally send to error queue.
+        
+        Args:
+            level: Logging level ('info', 'warning', 'error')
+            message: Message to log
+        """
         logger = logging.getLogger("rulescrape")
         getattr(logger, level)(f"[download] {message}")
         
@@ -47,7 +71,15 @@ class DownloadManager:
             self.error_queue.put(message)
     
     def get_dest_dir(self, post):
-        """Get destination directory based on organization method."""
+        """
+        Get destination directory based on organization method.
+        
+        Args:
+            post: Post metadata dictionary
+            
+        Returns:
+            str: Destination directory path
+        """
         image_url = post.get('file_url', '')
         ext = os.path.splitext(image_url.split('?')[0])[1].lower().replace('.', '')
         if ext not in ["jpg", "jpeg", "png", "gif", "webm", "mp4", "bmp", "svg"]:
@@ -73,7 +105,15 @@ class DownloadManager:
             return os.path.join(self.output_dir, ext, tag_list[0] if tag_list else "untagged")
     
     def process_post(self, post):
-        """Process a single post - download and check for duplicates."""
+        """
+        Process a single post - download and check for duplicates.
+        
+        Args:
+            post: Post metadata dictionary
+            
+        Returns:
+            str: Result status ('success', 'duplicate', 'error')
+        """
         image_url = post.get('file_url')
         if not image_url or not image_url.startswith(('http://', 'https://')):
             self.log_message('warning', f"Skipping invalid post: {post}")
@@ -124,7 +164,15 @@ class DownloadManager:
         return "error"
     
     def fetch_posts(self, fetch_limit):
-        """Fetch posts from the booru API with retry logic."""
+        """
+        Fetch posts from the booru API with retry logic.
+        
+        Args:
+            fetch_limit: Maximum number of posts to fetch
+            
+        Returns:
+            list or None: List of posts or None on failure
+        """
         import time
         
         attempt = 0

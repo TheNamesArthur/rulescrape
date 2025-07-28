@@ -1,35 +1,177 @@
 import os
+import json
+import queue
+import logging
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
-import logging
-import json
 
-# These should be imported from rulescrape.py if needed
 from rulescrape import load_user_settings, save_user_settings, skins_dir
 
+
+def _load_skin_configuration(user_settings, logger):
+    """
+    Load skin configuration from user settings or fallback to default.
+    
+    Args:
+        user_settings: Dictionary of user settings
+        logger: Logger instance
+        
+    Returns:
+        dict or None: Skin configuration dictionary or None if no skin found
+    """
+    skin = None
+    if user_settings.get('skin'):
+        skin_path = os.path.join(skins_dir, user_settings['skin'])
+        if os.path.exists(skin_path):
+            try:
+                with open(skin_path, 'r', encoding='utf-8') as f:
+                    skin = json.load(f)
+                logger.info(f"[gui._load_skin_configuration] Loaded skin from config: {user_settings['skin']}")
+            except Exception as e:
+                logger.warning(f"[gui._load_skin_configuration] Failed to load skin {user_settings['skin']}: {e}")
+                skin = None
+        else:
+            logger.warning(f"[gui._load_skin_configuration] Skin file {user_settings['skin']} not found. Falling back to default skin.")
+            skin = None
+    
+    if not skin:
+        from rulescrape import load_skin
+        skin = load_skin()
+    
+    return skin
+
+
+def _get_default_theme_config():
+    """
+    Get default theme configuration values.
+    
+    Returns:
+        tuple: (colors_dict, layout_dict) containing default theme values
+    """
+    colors = {
+        'bg_color': "#23272e",
+        'fg_color': "#f8f8f2",
+        'entry_bg': "#282c34",
+        'entry_fg': "#f8f8f2",
+        'button_bg': "#44475a",
+        'button_fg': "#f8f8f2",
+        'highlight_color': "#6272a4",
+        'font_family': "TkDefaultFont",
+        'font_size': 9
+    }
+    
+    layout = {
+        "booru_label": {"row": 0, "column": 0, "padx": 3, "pady": 1, "sticky": "e"},
+        "booru_var": {"row": 0, "column": 1, "padx": 3, "pady": 1, "sticky": "w"},
+        "tag_label": {"row": 1, "column": 0, "padx": 3, "pady": 1, "sticky": "e"},
+        "tag_entry": {"row": 1, "column": 1, "padx": 3, "pady": 1, "sticky": "w"},
+        "limit_label": {"row": 2, "column": 0, "padx": 3, "pady": 1, "sticky": "e"},
+        "limit_entry": {"row": 2, "column": 1, "padx": 3, "pady": 1, "sticky": "w"},
+        "anti_ai_checkbox": {"row": 4, "column": 0, "columnspan": 2, "padx": 3, "pady": (2, 0), "sticky": "n"},
+        "multithread_checkbox": {"row": 5, "column": 0, "columnspan": 2, "padx": 3, "pady": (1, 0), "sticky": "n"},
+        "start_button": {"row": 6, "column": 0, "columnspan": 2, "pady": 3, "sticky": "ew"},
+        "progress_bar": {"row": 7, "column": 0, "columnspan": 2, "padx": 3, "pady": 1, "sticky": "ew"},
+        "progress_label": {"row": 8, "column": 0, "columnspan": 2, "pady": 1}
+    }
+    
+    return colors, layout
+
+
+def _apply_skin_overrides(skin, colors, layout):
+    """
+    Apply skin overrides to default configuration.
+    
+    Args:
+        skin: Skin configuration dictionary
+        colors: Default colors dictionary
+        layout: Default layout dictionary
+        
+    Returns:
+        tuple: Updated (colors, layout) dictionaries
+    """
+    if not skin:
+        return colors, layout
+        
+    # Apply color overrides
+    for key in colors:
+        if key in skin:
+            colors[key] = skin[key]
+    
+    # Apply layout overrides
+    if "layout" in skin:
+        layout.update(skin["layout"])
+    
+    return colors, layout
+
+
+def _configure_ttk_styles(style, colors):
+    """
+    Configure TTK widget styles using color configuration.
+    
+    Args:
+        style: TTK Style instance
+        colors: Colors configuration dictionary
+    """
+    style.theme_use("clam")
+    
+    # Configure label style
+    style.configure("TLabel", 
+                   background=colors['bg_color'], 
+                   foreground=colors['fg_color'], 
+                   font=(colors['font_family'], colors['font_size']))
+    
+    # Configure button style
+    style.configure("TButton", 
+                   background=colors['button_bg'], 
+                   foreground=colors['button_fg'], 
+                   borderwidth=0, 
+                   focusthickness=3, 
+                   focuscolor=colors['highlight_color'], 
+                   font=(colors['font_family'], colors['font_size']))
+    style.map("TButton", background=[("active", colors['highlight_color'])])
+    
+    # Configure combobox style
+    contrasting_highlight = "#ffb86c"
+    style.configure("TCombobox", 
+                   fieldbackground=colors['entry_bg'], 
+                   background=colors['entry_bg'], 
+                   foreground=colors['entry_fg'], 
+                   font=(colors['font_family'], colors['font_size']), 
+                   selectbackground=contrasting_highlight, 
+                   selectforeground=colors['entry_fg'], 
+                   highlightbackground=contrasting_highlight, 
+                   highlightcolor=contrasting_highlight)
+    style.map("TCombobox", 
+              fieldbackground=[("active", contrasting_highlight)], 
+              background=[("active", contrasting_highlight)])
+
 def main_gui():
+    """Main GUI application entry point."""
     global root, progress_var, progress_bar, progress_label, booru_var, tag_entry, limit_entry, anti_ai_var, start_button
 
     logger = logging.getLogger("gui")
     user_settings = load_user_settings()
-    # Error queue handler for GUI popups (must be after root is defined)
-    import queue
+    max_workers = user_settings.get('max_workers', 8)
 
     def reload_user_settings():
+        """Reload user settings from configuration file."""
         nonlocal user_settings, max_workers
         user_settings = load_user_settings()
         max_workers = user_settings.get('max_workers', 8)
-
-    max_workers = user_settings.get('max_workers', 8)
+    # Initialize root window
     root = tk.Tk()
     root.title("Rulescrape")
     win_w = user_settings.get('window_width', 400)
     win_h = user_settings.get('window_height', 320)
     root.geometry(f"{win_w}x{win_h}")
 
+    # Setup error queue handler for GUI popups
     error_queue = queue.Queue()
+    
     def poll_error_queue():
+        """Poll for error messages and display them as popups."""
         try:
             while True:
                 msg = error_queue.get_nowait()
@@ -40,9 +182,27 @@ def main_gui():
         except queue.Empty:
             pass
         root.after(500, poll_error_queue)
+    
     # Start polling for error messages
     root.after(500, poll_error_queue)
 
+    # Load skin configuration and apply theme
+    skin = _load_skin_configuration(user_settings, logger)
+    if skin:
+        root.skin_file = user_settings['skin']
+    
+    # Get theme configuration
+    colors, layout = _get_default_theme_config()
+    colors, layout = _apply_skin_overrides(skin, colors, layout)
+    
+    # Configure TTK styles
+    style = ttk.Style(root)
+    _configure_ttk_styles(style, colors)
+    
+    # Configure root window
+    root.configure(bg=colors['bg_color'])
+
+    # Load skin configuration
     skin = None
     if user_settings.get('skin'):
         skin_path = os.path.join(skins_dir, user_settings['skin'])
@@ -58,10 +218,12 @@ def main_gui():
         else:
             logger.warning(f"[gui.main_gui] Skin file {user_settings['skin']} not found. Falling back to default skin.")
             skin = None
+    
     if not skin:
         from rulescrape import load_skin
         skin = load_skin()
 
+    # Default theme configuration
     bg_color = "#23272e"
     fg_color = "#f8f8f2"
     entry_bg = "#282c34"
@@ -71,6 +233,8 @@ def main_gui():
     highlight_color = "#6272a4"
     font_family = "TkDefaultFont"
     font_size = 9
+    
+    # Default layout configuration
     layout = {
         "booru_label": {"row": 0, "column": 0, "padx": 3, "pady": 1, "sticky": "e"},
         "booru_var": {"row": 0, "column": 1, "padx": 3, "pady": 1, "sticky": "w"},
@@ -84,6 +248,8 @@ def main_gui():
         "progress_bar": {"row": 7, "column": 0, "columnspan": 2, "padx": 3, "pady": 1, "sticky": "ew"},
         "progress_label": {"row": 8, "column": 0, "columnspan": 2, "pady": 1}
     }
+    
+    # Apply skin overrides if available
     if skin:
         bg_color = skin.get("bg_color", bg_color)
         fg_color = skin.get("fg_color", fg_color)
@@ -97,72 +263,75 @@ def main_gui():
         if "layout" in skin:
             layout.update(skin["layout"])
 
+    # Configure ttk styles
     style = ttk.Style(root)
     style.theme_use("clam")
-    style.configure("TLabel", background=bg_color, foreground=fg_color, font=(font_family, font_size))
-    style.configure("TButton", background=button_bg, foreground=button_fg, borderwidth=0, focusthickness=3, focuscolor=highlight_color, font=(font_family, font_size))
-    contrasting_highlight = "#ffb86c"
-    style.configure("TCombobox", fieldbackground=entry_bg, background=entry_bg, foreground=entry_fg, font=(font_family, font_size), selectbackground=contrasting_highlight, selectforeground=entry_fg, highlightbackground=contrasting_highlight, highlightcolor=contrasting_highlight)
-    style.map("TCombobox", fieldbackground=[("active", contrasting_highlight)], background=[("active", contrasting_highlight)])
+    
+    # Configure label style
+    style.configure("TLabel", 
+                   background=bg_color, 
+                   foreground=fg_color, 
+                   font=(font_family, font_size))
+    
+    # Configure button style
+    style.configure("TButton", 
+                   background=button_bg, 
+                   foreground=button_fg, 
+                   borderwidth=0, 
+                   focusthickness=3, 
+                   focuscolor=highlight_color, 
+                   font=(font_family, font_size))
     style.map("TButton", background=[("active", highlight_color)])
+    
+    # Configure combobox style
+    contrasting_highlight = "#ffb86c"
+    style.configure("TCombobox", 
+                   fieldbackground=entry_bg, 
+                   background=entry_bg, 
+                   foreground=entry_fg, 
+                   font=(font_family, font_size), 
+                   selectbackground=contrasting_highlight, 
+                   selectforeground=entry_fg, 
+                   highlightbackground=contrasting_highlight, 
+                   highlightcolor=contrasting_highlight)
+    style.map("TCombobox", 
+              fieldbackground=[("active", contrasting_highlight)], 
+              background=[("active", contrasting_highlight)])
+    
+    # Configure root window
     root.configure(bg=bg_color)
 
-    # Define progress_var and progress_bar before use
+    # Initialize progress tracking variables
     progress_var = tk.IntVar(value=0)
     progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100, style="TProgressbar")
+    progress_label = ttk.Label(root, text="Progress: 0%", font=(colors['font_family'], colors['font_size']))
 
-    booru_var = ttk.Combobox(root, values=["rule34", "safebooru", "danbooru", "yande.re"], state="readonly", font=(font_family, font_size))
+    # Create main input widgets
+    booru_label = ttk.Label(root, text="Booru Type:", font=(colors['font_family'], colors['font_size']))
+    booru_var = ttk.Combobox(root, 
+                            values=["rule34", "safebooru", "danbooru", "yande.re"], 
+                            state="readonly", 
+                            font=(colors['font_family'], colors['font_size']))
     booru_var.set(user_settings.get('booru_type', 'rule34'))
-    booru_var.configure(background=entry_bg, foreground=entry_fg)
+    booru_var.configure(background=colors['entry_bg'], foreground=colors['entry_fg'])
 
-    def show_danbooru_rate_limit_alert():
-        messagebox.showinfo(
-            "Danbooru Rate Limits",
-            "Danbooru enforces a global rate limit of 10 read requests per second for all users and endpoints.\n\nUpdate actions are rate limited by user level:\n- Basic users: 1 update/second\n- Gold users and above: 4 updates/second\n\nEach endpoint has a burst pool allowing several consecutive updates before rate limiting applies. Most endpoints recharge at the rates above."
-        )
-
-    def on_booru_selected(event=None):
-        if booru_var.get() == "danbooru":
-            show_danbooru_rate_limit_alert()
-        save_config_live()
-
-    booru_var.bind("<<ComboboxSelected>>", on_booru_selected)
-    # Widget creation
-    tag_label = ttk.Label(root, text="Tag:", font=(font_family, font_size))
-    tag_entry = tk.Entry(root, bg=entry_bg, fg=entry_fg, insertbackground=fg_color, font=(font_family, font_size))
+    tag_label = ttk.Label(root, text="Tag:", font=(colors['font_family'], colors['font_size']))
+    tag_entry = tk.Entry(root, 
+                        bg=colors['entry_bg'], 
+                        fg=colors['entry_fg'], 
+                        insertbackground=colors['fg_color'], 
+                        font=(colors['font_family'], colors['font_size']))
     tag_entry.insert(0, user_settings.get('tag', 'Enter tag...') or 'Enter tag...')
-    anti_ai_var = tk.BooleanVar(value=user_settings.get('anti_ai', False))
-    anti_ai_checkbox = tk.Checkbutton(
-        root,
-        text="Anti-AI tags",
-        variable=anti_ai_var,
-        bg=bg_color,
-        fg=fg_color,
-        activebackground=bg_color,
-        activeforeground=fg_color,
-        selectcolor=bg_color,
-        font=(font_family, font_size)
-    )
-    multithread_var = tk.BooleanVar(value=user_settings.get('multithread', False))
-    def show_multithread_warning():
-        messagebox.showwarning(
-            "Multi-threading Warning",
-            "Enabling multi-threaded downloads will make downloads faster, but the progress bar may be less accurate."
-        )
-    multithread_checkbox = tk.Checkbutton(
-        root,
-        text="Enable multi-threaded downloads (experimental)",
-        variable=multithread_var,
-        bg=bg_color,
-        fg=fg_color,
-        activebackground=bg_color,
-        activeforeground=fg_color,
-        selectcolor=bg_color,
-        font=(font_family, font_size),
-        command=lambda: show_multithread_warning() if multithread_var.get() else None
-    )
-    limit_label = ttk.Label(root, text="Limit:", font=(font_family, font_size))
-    limit_entry = tk.Entry(root, bg=entry_bg, fg=entry_fg, insertbackground=fg_color, font=(font_family, font_size))
+
+    limit_label = ttk.Label(root, text="Limit:", font=(colors['font_family'], colors['font_size']))
+    limit_entry = tk.Entry(root, 
+                          bg=colors['entry_bg'], 
+                          fg=colors['entry_fg'], 
+                          insertbackground=colors['fg_color'], 
+                          font=(colors['font_family'], colors['font_size']))
+    limit_entry.insert(0, str(user_settings.get('limit', 10)))
+
+    # Create organization method dropdown
     org_methods = [
         "By extension and first tag",
         "By extension only",
@@ -170,11 +339,68 @@ def main_gui():
         "By tag only"
     ]
     org_method_var = tk.StringVar(value=user_settings.get('org_method', org_methods[0]))
-    org_method_label = ttk.Label(root, text="Organization Method:", font=(font_family, font_size))
-    org_method_dropdown = ttk.Combobox(root, values=org_methods, textvariable=org_method_var, state="readonly", font=(font_family, font_size))
-    org_method_dropdown.configure(background=entry_bg, foreground=entry_fg)
-    limit_entry.insert(0, str(user_settings.get('limit', 10)))
-    progress_label = ttk.Label(root, text="Progress: 0%", font=(font_family, font_size))
+    org_method_label = ttk.Label(root, text="Organization Method:", font=(colors['font_family'], colors['font_size']))
+    org_method_dropdown = ttk.Combobox(root, 
+                                      values=org_methods, 
+                                      textvariable=org_method_var, 
+                                      state="readonly", 
+                                      font=(colors['font_family'], colors['font_size']))
+    org_method_dropdown.configure(background=colors['entry_bg'], foreground=colors['entry_fg'])
+
+    # Create option checkboxes
+    anti_ai_var = tk.BooleanVar(value=user_settings.get('anti_ai', False))
+    anti_ai_checkbox = tk.Checkbutton(
+        root,
+        text="Anti-AI tags",
+        variable=anti_ai_var,
+        bg=colors['bg_color'],
+        fg=colors['fg_color'],
+        activebackground=colors['bg_color'],
+        activeforeground=colors['fg_color'],
+        selectcolor=colors['bg_color'],
+        font=(colors['font_family'], colors['font_size'])
+    )
+
+    multithread_var = tk.BooleanVar(value=user_settings.get('multithread', False))
+
+    # Helper functions for GUI callbacks
+    def show_danbooru_rate_limit_alert():
+        messagebox.showinfo(
+            "Danbooru Rate Limits",
+            "Danbooru enforces a global rate limit of 10 read requests per second for all users and endpoints.\n\n"
+            "Update actions are rate limited by user level:\n"
+            "- Basic users: 1 update/second\n"
+            "- Gold users and above: 4 updates/second\n\n"
+            "Each endpoint has a burst pool allowing several consecutive updates before rate limiting applies. "
+            "Most endpoints recharge at the rates above."
+        )
+
+    def show_multithread_warning():
+        messagebox.showwarning(
+            "Multi-threading Warning",
+            "Enabling multi-threaded downloads will make downloads faster, but the progress bar may be less accurate."
+        )
+
+    def on_booru_selected(event=None):
+        if booru_var.get() == "danbooru":
+            show_danbooru_rate_limit_alert()
+        save_config_live()
+
+    # Bind event handlers
+    booru_var.bind("<<ComboboxSelected>>", on_booru_selected)
+    # Create multithread checkbox with warning
+    multithread_checkbox = tk.Checkbutton(
+        root,
+        text="Enable multi-threaded downloads (experimental)",
+        variable=multithread_var,
+        bg=colors['bg_color'],
+        fg=colors['fg_color'],
+        activebackground=colors['bg_color'],
+        activeforeground=colors['fg_color'],
+        selectcolor=colors['bg_color'],
+        font=(colors['font_family'], colors['font_size']),
+        command=lambda: show_multithread_warning() if multithread_var.get() else None
+    )
     # Widget grid placement
     org_method_label.grid(row=3, column=0, padx=3, pady=1, sticky="e")
     org_method_dropdown.grid(row=3, column=1, padx=3, pady=1, sticky="w")
@@ -188,8 +414,8 @@ def main_gui():
     if skin:
         progress_animation_colors = skin.get("progress_bar_animation", [])
     progress_animation_speed = skin.get("progress_bar_animation_speed", 100) if skin else 100
-    progress_bar_color = skin.get("progress_bar_color", highlight_color) if skin else highlight_color
-    style.configure("TProgressbar", troughcolor=bg_color, background=progress_bar_color)
+    progress_bar_color = skin.get("progress_bar_color", colors['highlight_color']) if skin else colors['highlight_color']
+    style.configure("TProgressbar", troughcolor=colors['bg_color'], background=progress_bar_color)
     animation_running = False
     animation_index = 0
     def start_progress_animation():
@@ -289,8 +515,9 @@ def main_gui():
                                     current = int(parts[0])
                                     duplicates = dupe_checker.get_duplicate_count()
                                     progress_mgr.update_progress(current, duplicates)
-                            except:
-                                pass  # Ignore parsing errors
+                            except (ValueError, IndexError) as e:
+                                # Ignore parsing errors for log messages
+                                logger.debug(f"[gui.gui_log_message_wrapper] Failed to parse progress from log message: {e}")
                     return wrapper
                 
                 # Monkey patch the download manager's log_message method
@@ -421,16 +648,16 @@ def main_gui():
     start_button = tk.Button(
         root,
         text="Start Download",
-        bg=button_bg,
-        fg=button_fg,
-        activebackground=highlight_color,
-        activeforeground=fg_color,
-        font=(font_family, font_size),
+        bg=colors['button_bg'],
+        fg=colors['button_fg'],
+        activebackground=colors['highlight_color'],
+        activeforeground=colors['fg_color'],
+        font=(colors['font_family'], colors['font_size']),
         command=start_download
     )
     root.grid_rowconfigure((0, 1, 2, 3, 4, 5, 6, 7), weight=1)
     root.grid_columnconfigure((0, 1), weight=1)
-    booru_label = ttk.Label(root, text="Booru Type:", font=(font_family, font_size))
+    booru_label = ttk.Label(root, text="Booru Type:", font=(colors['font_family'], colors['font_size']))
     booru_label.grid(**layout["booru_label"])
     booru_var.grid(**layout["booru_var"])
     tag_label.grid(**layout["tag_label"])
@@ -470,39 +697,46 @@ def main_gui():
     if hasattr(root, 'skin_file') and root.skin_file in skin_files:
         current_skin_index = skin_files.index(root.skin_file)
     def apply_skin_by_index(idx):
-        nonlocal skin, bg_color, fg_color, entry_bg, entry_fg, button_bg, button_fg, highlight_color, font_family, font_size, layout, progress_animation_colors, progress_animation_speed, progress_bar_color
+        """Apply a skin configuration by index from the available skin files."""
+        nonlocal skin, colors, layout, progress_animation_colors, progress_animation_speed, progress_bar_color
         skin_path = os.path.join(skins_dir, skin_files[idx])
         try:
             with open(skin_path, 'r', encoding='utf-8') as f:
                 skin_obj = json.load(f)
             skin = skin_obj
             root.skin_file = skin_files[idx]
-            bg_color = skin.get("bg_color", bg_color)
-            fg_color = skin.get("fg_color", fg_color)
-            entry_bg = skin.get("entry_bg", entry_bg)
-            entry_fg = skin.get("entry_fg", entry_fg)
-            button_bg = skin.get("button_bg", button_bg)
-            button_fg = skin.get("button_fg", button_fg)
-            highlight_color = skin.get("highlight_color", highlight_color)
-            font_family = skin.get("font_family", font_family)
-            font_size = skin.get("font_size", font_size)
+            
+            # Update colors from skin
+            for key in colors:
+                if key in skin:
+                    colors[key] = skin[key]
+            
+            # Update layout from skin
             if "layout" in skin:
                 layout.update(skin["layout"])
+                
+            # Update progress bar configuration
             progress_animation_colors = skin.get("progress_bar_animation", [])
             progress_animation_speed = skin.get("progress_bar_animation_speed", 100)
-            progress_bar_color = skin.get("progress_bar_color", highlight_color)
-            style.configure("TProgressbar", troughcolor=bg_color, background=progress_bar_color)
-            style.configure("TLabel", background=bg_color, foreground=fg_color, font=(font_family, font_size))
-            style.configure("TButton", background=button_bg, foreground=button_fg, borderwidth=0, focusthickness=3, focuscolor=highlight_color, font=(font_family, font_size))
-            style.configure("TCombobox", fieldbackground=entry_bg, background=entry_bg, foreground=entry_fg, font=(font_family, font_size))
-            root.configure(bg=bg_color)
-            tag_entry.config(bg=entry_bg, fg=entry_fg, insertbackground=fg_color, font=(font_family, font_size))
-            limit_entry.config(bg=entry_bg, fg=entry_fg, insertbackground=fg_color, font=(font_family, font_size))
-            anti_ai_checkbox.config(bg=bg_color, fg=fg_color, activebackground=bg_color, activeforeground=fg_color, selectcolor=bg_color, font=(font_family, font_size))
-            multithread_checkbox.config(bg=bg_color, fg=fg_color, activebackground=bg_color, activeforeground=fg_color, selectcolor=bg_color, font=(font_family, font_size))
-            start_button.config(bg=button_bg, fg=button_fg, activebackground=highlight_color, activeforeground=fg_color, font=(font_family, font_size))
-            booru_var.config(background=entry_bg, foreground=entry_fg, font=(font_family, font_size))
-            org_method_dropdown.config(background=entry_bg, foreground=entry_fg, font=(font_family, font_size))
+            progress_bar_color = skin.get("progress_bar_color", colors['highlight_color'])
+            
+            # Reconfigure styles with new colors
+            style.configure("TProgressbar", troughcolor=colors['bg_color'], background=progress_bar_color)
+            style.configure("TLabel", background=colors['bg_color'], foreground=colors['fg_color'], font=(colors['font_family'], colors['font_size']))
+            style.configure("TButton", background=colors['button_bg'], foreground=colors['button_fg'], borderwidth=0, focusthickness=3, focuscolor=colors['highlight_color'], font=(colors['font_family'], colors['font_size']))
+            style.configure("TCombobox", fieldbackground=colors['entry_bg'], background=colors['entry_bg'], foreground=colors['entry_fg'], font=(colors['font_family'], colors['font_size']))
+            
+            # Update root window and widgets
+            root.configure(bg=colors['bg_color'])
+            tag_entry.config(bg=colors['entry_bg'], fg=colors['entry_fg'], insertbackground=colors['fg_color'], font=(colors['font_family'], colors['font_size']))
+            limit_entry.config(bg=colors['entry_bg'], fg=colors['entry_fg'], insertbackground=colors['fg_color'], font=(colors['font_family'], colors['font_size']))
+            anti_ai_checkbox.config(bg=colors['bg_color'], fg=colors['fg_color'], activebackground=colors['bg_color'], activeforeground=colors['fg_color'], selectcolor=colors['bg_color'], font=(colors['font_family'], colors['font_size']))
+            multithread_checkbox.config(bg=colors['bg_color'], fg=colors['fg_color'], activebackground=colors['bg_color'], activeforeground=colors['fg_color'], selectcolor=colors['bg_color'], font=(colors['font_family'], colors['font_size']))
+            start_button.config(bg=colors['button_bg'], fg=colors['button_fg'], activebackground=colors['highlight_color'], activeforeground=colors['fg_color'], font=(colors['font_family'], colors['font_size']))
+            booru_var.config(background=colors['entry_bg'], foreground=colors['entry_fg'], font=(colors['font_family'], colors['font_size']))
+            org_method_dropdown.config(background=colors['entry_bg'], foreground=colors['entry_fg'], font=(colors['font_family'], colors['font_size']))
+            
+            # Regrid all widgets with new layout
             booru_label.grid(**layout["booru_label"])
             booru_var.grid(**layout["booru_var"])
             tag_label.grid(**layout["tag_label"])
