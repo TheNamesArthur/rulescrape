@@ -177,9 +177,10 @@ This helps reduce the appearance of AI-generated content in results—especially
 - **Memory-Efficient Scanning**: Optimized existing image scanning for duplicate detection
 
 #### 📊 **Statistics**
-- **666 lines added, 214 lines removed** across 5 files
-- **New Files**: `download.py` (334 lines), `dupe_check.py` (181 lines)  
-- **Major Refactoring**: `rulescrape.py` streamlined, `gui.py` enhanced
+- **1,282 lines added, 391 lines removed** across 7 files (main → V1.5)
+- **New Files**: `download.py` (+382 lines), `dupe_check.py` (+181 lines)  
+- **Major Enhancements**: `gui.py` (+431/-154), `booru_api.py` (+97/-63), `rulescrape.py` (+114/-151)
+- **Total V1.5 Codebase**: 1,855 lines across 5 core Python files
 
 ### Differences from Main Branch:
 - **Main**: Basic dual-booru support (Rule34/Safebooru only)
