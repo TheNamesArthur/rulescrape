@@ -309,7 +309,7 @@ def main_gui():
     # Create main input widgets
     booru_label = ttk.Label(root, text="Booru Type:", font=(colors['font_family'], colors['font_size']))
     booru_var = ttk.Combobox(root, 
-                            values=["rule34", "safebooru", "danbooru", "yande.re"], 
+                            values=["rule34", "safebooru", "danbooru", "yande.re", "paheal"], 
                             state="readonly", 
                             font=(colors['font_family'], colors['font_size']))
     booru_var.set(user_settings.get('booru_type', 'rule34'))

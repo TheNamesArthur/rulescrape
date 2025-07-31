@@ -80,7 +80,14 @@ class DownloadManager:
         Returns:
             str: Destination directory path
         """
-        image_url = post.get('file_url', '')
+        # Get image URL based on booru type to extract file extension
+        if self.booru_type == 'paheal':
+            # Paheal file_url doesn't have extension, use file_name instead
+            file_name = post.get('file_name', '')
+            image_url = file_name  # Use file_name for extension extraction
+        else:
+            image_url = post.get('file_url', '')
+            
         ext = os.path.splitext(image_url.split('?')[0])[1].lower().replace('.', '')
         if ext not in ["jpg", "jpeg", "png", "gif", "webm", "mp4", "bmp", "svg"]:
             ext = "other"
@@ -88,6 +95,10 @@ class DownloadManager:
         # Get tags - handle different booru tag formats
         if self.booru_type == "danbooru":
             tags = post.get('tag_string', '')
+            tag_list = tags.split() if isinstance(tags, str) else []
+        elif self.booru_type == "paheal":
+            # Paheal uses space-separated tags in 'tags' field
+            tags = post.get('tags', '')
             tag_list = tags.split() if isinstance(tags, str) else []
         else:
             tags = post.get('tags', '')
@@ -114,7 +125,14 @@ class DownloadManager:
         Returns:
             str: Result status ('success', 'duplicate', 'error')
         """
-        image_url = post.get('file_url')
+        # Get image URL based on booru type
+        if self.booru_type == 'paheal':
+            # Paheal uses file_url directly
+            image_url = post.get('file_url')
+        else:
+            # Other boorus use file_url
+            image_url = post.get('file_url')
+            
         if not image_url or not image_url.startswith(('http://', 'https://')):
             self.log_message('warning', f"Skipping invalid post: {post}")
             return "error"

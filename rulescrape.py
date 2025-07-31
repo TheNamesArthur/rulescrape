@@ -2,7 +2,7 @@
 Rulescrape: Download images from booru-style imageboards.
 
 This module provides both CLI and GUI interfaces for downloading images from various
-booru sites including rule34, safebooru, danbooru, and yande.re. Features include
+booru sites including rule34, safebooru, danbooru, yande.re, and paheal. Features include
 tag-based filtering, duplicate detection, multi-threaded downloads, and theme support.
 """
 
