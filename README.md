@@ -320,7 +320,6 @@ ImportError: No module named 'customtkinter'
 - **`core/booru_api.py`** (357 lines) - Multi-site API integration (rule34, danbooru, etc.)
 - **`core/animated_preview.py`** (290 lines) - GIF/video animation system with frame caching
 - **`core/dupe_check.py`** (257 lines) - MD5-based duplicate detection with multithreading
-- **`core/build.py`** (204 lines) - PyInstaller build automation
 
 ### Key Improvements from Previous Versions:
 - **Modular Architecture**: Separated concerns into specialized modules
