@@ -1,2 +1,10 @@
+# Core dependencies
 requests>=2.25.0
 tqdm>=4.60.0
+
+# Modern GUI dependencies
+customtkinter>=5.0.0
+Pillow>=9.0.0
+
+# Optional dependencies for enhanced features
+opencv-python>=4.5.0  # For video thumbnail generation and preview

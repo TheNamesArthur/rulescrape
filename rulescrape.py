@@ -36,32 +36,7 @@ os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, "rulescrape.log")
 
 # Config file for user settings
-CONFIG_FILE = os.path.join('user_settings.config')
-
-# Skins support: create skins folder if not exists
-skins_dir = os.path.join("skins")
-os.makedirs(skins_dir, exist_ok=True)
-
-def load_skin():
-    """
-    Load skin configuration from JSON files in skins directory.
-    
-    Returns:
-        dict or None: Skin configuration dictionary or None if no skin found
-    """
-    # Look for any .json file in skins_dir
-    for fname in os.listdir(skins_dir):
-        if fname.endswith('.json'):
-            skin_path = os.path.join(skins_dir, fname)
-            try:
-                with open(skin_path, 'r', encoding='utf-8') as f:
-                    skin = json.load(f)
-                logging.info(f"Loaded skin: {fname}")
-                return skin
-            except Exception as e:
-                logging.warning(f"Failed to load skin {fname}: {e}")
-                continue
-    return None
+CONFIG_FILE = os.path.join('cli.config')
 
 class GzTimedRotatingFileHandler(TimedRotatingFileHandler):
     """
@@ -117,7 +92,7 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     import queue
     error_queue = None
     try:
-        from gui import error_queue as gui_error_queue
+        from core.gui import error_queue as gui_error_queue
         error_queue = gui_error_queue
     except Exception:
         error_queue = None
@@ -131,7 +106,7 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     org_method = user_settings.get('org_method', 'By extension and first tag')
     
     # Initialize duplication checker and scan existing images
-    from dupe_check import get_dupe_checker
+    from core.dupe_check import get_dupe_checker
     dupe_checker = get_dupe_checker(user_settings.get('output_dir', 'images'))
     
     # Scan existing images before starting download
@@ -140,7 +115,7 @@ def run_script(booru_type, tag, limit, multithread=False, max_workers=None):
     logging.getLogger("rulescrape").info(f"[rulescrape.run_script] Scanned {scanned_count} existing images for duplicate detection")
 
     # Use the unified download module
-    from download import run_download
+    from core.download import run_download
     
     success = run_download(
         booru_type=booru_type,
@@ -182,7 +157,6 @@ def load_user_settings():
         'org_method': 'By extension and first tag',
         'max_workers': default_workers,
         'output_dir': 'images',
-        'skin': None,
         'window_width': 400,
         'window_height': 320
     }
@@ -199,14 +173,13 @@ def load_user_settings():
             settings['max_workers'] = config['Settings'].getint('max_workers', settings['max_workers'])
             settings['output_dir'] = config['Settings'].get('output_dir', settings['output_dir'])
         if 'UI' in config:
-            settings['skin'] = config['UI'].get('skin', settings['skin'])
             settings['window_width'] = config['UI'].getint('window_width', settings['window_width'])
             settings['window_height'] = config['UI'].getint('window_height', settings['window_height'])
         return settings
     return default_settings
 
 
-def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method, output_dir='images', skin=None, window_width=400, window_height=320):
+def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method, output_dir='images', window_width=400, window_height=320):
     """
     Save user settings to configuration file.
     
@@ -218,7 +191,6 @@ def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method,
         multithread (bool): Whether to use multi-threading
         org_method (str): File organization method
         output_dir (str): Output directory for images
-        skin (str, optional): Skin file name
         window_width (int): GUI window width
         window_height (int): GUI window height
     """
@@ -259,8 +231,6 @@ def save_user_settings(booru_type, tag, limit, anti_ai, multithread, org_method,
         f"max_workers = {prev_max_workers}",
         "",
         "[UI]",
-        "# Skin/theme file for GUI",
-        f"skin = {skin if skin is not None else 'None'}",
         "# GUI window width",
         f"window_width = {window_width}",
         "# GUI window height",
@@ -284,11 +254,105 @@ if __name__ == "__main__":
     parser.add_argument('--multithread', action='store_true', help='Enable multithreaded downloads')
     parser.add_argument('--max_workers', type=int, help='Number of threads/workers for multithreaded downloads')
     parser.add_argument('--org_method', type=str, help='Organization method for images')
-    parser.add_argument('--skin', type=str, help='Skin file to use for GUI')
     parser.add_argument('--window_width', type=int, help='Window width for GUI')
     parser.add_argument('--window_height', type=int, help='Window height for GUI')
     parser.add_argument('--cli', action='store_true', help='Force CLI mode (do not launch GUI)')
+    
+    # Blacklist management arguments
+    parser.add_argument('--blacklist-add', type=str, help='Add a tag to the blacklist')
+    parser.add_argument('--blacklist-remove', type=str, help='Remove a tag from the blacklist')
+    parser.add_argument('--blacklist-list', action='store_true', help='List all blacklisted tags')
+    parser.add_argument('--blacklist-stats', action='store_true', help='Show blacklist statistics')
+    parser.add_argument('--blacklist-enable', action='store_true', help='Enable blacklist filtering')
+    parser.add_argument('--blacklist-disable', action='store_true', help='Disable blacklist filtering')
+    parser.add_argument('--blacklist-file', type=str, help='Path to custom blacklist JSON file')
+    
     args = parser.parse_args()
+
+    # Handle blacklist management commands first
+    blacklist_commands = [
+        args.blacklist_add, args.blacklist_remove, args.blacklist_list,
+        args.blacklist_stats, args.blacklist_enable, args.blacklist_disable
+    ]
+    
+    if any(blacklist_commands):
+        # Import blacklist module
+        from core.blacklist import get_blacklist_manager
+        
+        # Get blacklist manager with custom file if specified
+        blacklist_manager = get_blacklist_manager(args.blacklist_file)
+        
+        # Handle blacklist add command
+        if args.blacklist_add:
+            tag = args.blacklist_add.strip()
+            if blacklist_manager.add_tag(tag):
+                print(f"✅ Added tag to blacklist: {tag}")
+                if blacklist_manager.save_blacklist():
+                    print("💾 Blacklist saved successfully")
+                else:
+                    print("❌ Failed to save blacklist")
+            else:
+                print(f"⚠️ Tag already in blacklist or invalid: {tag}")
+        
+        # Handle blacklist remove command
+        elif args.blacklist_remove:
+            tag = args.blacklist_remove.strip()
+            if blacklist_manager.remove_tag(tag):
+                print(f"✅ Removed tag from blacklist: {tag}")
+                if blacklist_manager.save_blacklist():
+                    print("💾 Blacklist saved successfully")
+                else:
+                    print("❌ Failed to save blacklist")
+            else:
+                print(f"⚠️ Tag not found in blacklist: {tag}")
+        
+        # Handle blacklist list command
+        elif args.blacklist_list:
+            tags = blacklist_manager.get_blacklisted_tags()
+            if tags:
+                print(f"📋 Blacklisted tags ({len(tags)} total):")
+                for i, tag in enumerate(tags, 1):
+                    print(f"  {i:3d}. {tag}")
+                
+                # Show tag groups if any
+                groups = blacklist_manager.get_tag_groups()
+                if groups:
+                    print(f"\n📁 Tag groups ({len(groups)} total):")
+                    for group_name, group_tags in groups.items():
+                        print(f"  {group_name}: {', '.join(group_tags)}")
+            else:
+                print("📋 No tags in blacklist")
+        
+        # Handle blacklist stats command
+        elif args.blacklist_stats:
+            stats = blacklist_manager.get_blacklist_stats()
+            print("📊 Blacklist Statistics:")
+            print(f"  Status: {'Enabled' if stats['enabled'] else 'Disabled'}")
+            print(f"  Case sensitive: {'Yes' if stats['case_sensitive'] else 'No'}")
+            print(f"  Total tags: {stats['total_tags']}")
+            print(f"  Individual tags: {stats['individual_tags']}")
+            print(f"  Tag groups: {stats['tag_groups']}")
+            print(f"  Tags in groups: {stats['group_tags']}")
+            print(f"  Blacklist file: {stats['blacklist_file']}")
+        
+        # Handle blacklist enable command
+        elif args.blacklist_enable:
+            blacklist_manager.enable_blacklist()
+            if blacklist_manager.save_blacklist():
+                print("✅ Blacklist enabled and saved")
+            else:
+                print("✅ Blacklist enabled (failed to save)")
+        
+        # Handle blacklist disable command  
+        elif args.blacklist_disable:
+            blacklist_manager.disable_blacklist()
+            if blacklist_manager.save_blacklist():
+                print("🚫 Blacklist disabled and saved")
+            else:
+                print("🚫 Blacklist disabled (failed to save)")
+        
+        # Exit after handling blacklist commands
+        sys.exit(0)
 
     # If any CLI-relevant argument is provided or --cli is set, run in CLI mode
     cli_mode = args.cli or any([
@@ -309,7 +373,6 @@ if __name__ == "__main__":
         multithread = args.multithread if args.multithread else settings.get('multithread', False)
         org_method = args.org_method or settings.get('org_method', 'By extension and first tag')
         output_dir = settings.get('output_dir', 'images')
-        skin = args.skin or settings.get('skin', None)
         window_width = args.window_width if args.window_width is not None else settings.get('window_width', 400)
         window_height = args.window_height if args.window_height is not None else settings.get('window_height', 320)
         max_workers = args.max_workers if args.max_workers is not None else settings.get('max_workers', None)
@@ -317,7 +380,7 @@ if __name__ == "__main__":
         # Save settings for future GUI use
         save_user_settings(
             booru_type, tag, limit, anti_ai, multithread, org_method, output_dir,
-            skin=skin, window_width=window_width, window_height=window_height
+            window_width=window_width, window_height=window_height
         )
         # If max_workers is specified, update config file directly
         if max_workers is not None:
@@ -351,5 +414,12 @@ if __name__ == "__main__":
         cli_log.error = orig_error
         cli_log.info(f"[CLI] Finished CLI run.")
     else:
-        from gui import main_gui
-        main_gui()
+        # Launch modern GUI directly
+        try:
+            from core.gui import main_gui
+            main_gui()
+        except ImportError as e:
+            print(f"Modern GUI not available: {e}")
+            print("Please install required dependencies:")
+            print("  pip install customtkinter pillow requests")
+            print("Then try running the application again.")

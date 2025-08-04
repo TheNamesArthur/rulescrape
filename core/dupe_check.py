@@ -3,6 +3,8 @@ import hashlib
 import logging
 from typing import Set, Optional
 import time
+import concurrent.futures
+from pathlib import Path
 
 class DuplicationChecker:
     """
@@ -45,6 +47,7 @@ class DuplicationChecker:
     def scan_existing_images(self) -> int:
         """
         Scan all existing images in the images directory and cache their MD5 hashes.
+        Uses multithreading for improved performance on large collections.
         
         Returns:
             Number of images scanned and cached
@@ -58,25 +61,50 @@ class DuplicationChecker:
             return 0
         
         image_extensions = (".jpg", ".jpeg", ".png", ".gif", ".webm", ".mp4", ".bmp", ".svg")
-        scanned_count = 0
         
-        self.logger.info(f"[dupe_check.scan_existing_images] Starting scan of existing images in {self.images_base_dir}")
+        self.logger.info(f"[dupe_check.scan_existing_images] Starting multithreaded scan of existing images in {self.images_base_dir}")
         
+        # Collect all image files
+        image_files = []
         for root, dirs, files in os.walk(self.images_base_dir):
             for file in files:
                 if file.lower().endswith(image_extensions):
                     filepath = os.path.join(root, file)
-                    file_hash = self._md5sum(filepath)
+                    image_files.append(filepath)
+        
+        if not image_files:
+            self.logger.info(f"[dupe_check.scan_existing_images] No image files found in {self.images_base_dir}")
+            return 0
+        
+        scanned_count = 0
+        max_workers = min(8, (os.cpu_count() or 1) + 4)  # Reasonable thread count
+        
+        # Process files in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all hash calculation tasks
+            future_to_file = {
+                executor.submit(self._md5sum, filepath): filepath
+                for filepath in image_files
+            }
+            
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_file):
+                filepath = future_to_file[future]
+                try:
+                    file_hash = future.result()
                     if file_hash:
                         self.cached_hashes.add(file_hash)
                         scanned_count += 1
                         
                         # Log progress every 100 files
                         if scanned_count % 100 == 0:
-                            self.logger.info(f"[dupe_check.scan_existing_images] Scanned {scanned_count} images...")
+                            self.logger.info(f"[dupe_check.scan_existing_images] Scanned {scanned_count}/{len(image_files)} images...")
+                            
+                except Exception as e:
+                    self.logger.warning(f"[dupe_check.scan_existing_images] Error processing {filepath}: {e}")
         
         scan_time = time.time() - start_time
-        self.logger.info(f"[dupe_check.scan_existing_images] Completed scan: {scanned_count} images cached in {scan_time:.2f} seconds")
+        self.logger.info(f"[dupe_check.scan_existing_images] Completed multithreaded scan: {scanned_count} images cached in {scan_time:.2f} seconds using {max_workers} workers")
         
         return scanned_count
     
@@ -107,6 +135,54 @@ class DuplicationChecker:
         # Add the hash to cache for future duplicate detection
         self.cached_hashes.add(file_hash)
         return False
+    
+    def check_duplicates_batch(self, filepaths: list) -> dict:
+        """
+        Check multiple files for duplicates in parallel.
+        
+        Args:
+            filepaths: List of file paths to check
+            
+        Returns:
+            Dictionary mapping file paths to boolean duplicate status
+        """
+        if not filepaths:
+            return {}
+        
+        results = {}
+        max_workers = min(4, len(filepaths), (os.cpu_count() or 1))
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit hash calculation tasks
+            future_to_file = {
+                executor.submit(self._md5sum, filepath): filepath
+                for filepath in filepaths
+                if os.path.exists(filepath)
+            }
+            
+            # Collect results as they complete
+            for future in concurrent.futures.as_completed(future_to_file):
+                filepath = future_to_file[future]
+                try:
+                    file_hash = future.result()
+                    if file_hash:
+                        if file_hash in self.cached_hashes:
+                            self.duplicates_found += 1
+                            results[filepath] = True
+                            self.logger.info(f"[dupe_check.check_duplicates_batch] Duplicate detected: {filepath} (hash: {file_hash[:12]}...)")
+                        else:
+                            # Add to cache for future checks
+                            self.cached_hashes.add(file_hash)
+                            results[filepath] = False
+                    else:
+                        results[filepath] = False
+                        self.logger.warning(f"[dupe_check.check_duplicates_batch] Could not calculate hash for: {filepath}")
+                        
+                except Exception as e:
+                    results[filepath] = False
+                    self.logger.warning(f"[dupe_check.check_duplicates_batch] Error processing {filepath}: {e}")
+        
+        return results
     
     def add_hash_to_cache(self, filepath: str) -> bool:
         """
