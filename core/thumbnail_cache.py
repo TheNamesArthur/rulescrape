@@ -59,7 +59,7 @@ class DiskThumbnailCache:
         
         self.metadata_file = self.cache_dir / "cache_metadata.json"
         self.max_cache_size_bytes = max_cache_size_mb * 1024 * 1024
-        self.max_workers = max_workers or min(8, (os.cpu_count() or 1) + 4)
+        self.max_workers = max_workers or max(1, (os.cpu_count() or 1) // 2)
         
         self.metadata: Dict[str, Dict[str, Any]] = {}
         self.cache_lock = threading.Lock()
