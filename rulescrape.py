@@ -8,13 +8,11 @@ tag-based filtering, duplicate detection, multi-threaded downloads, and theme su
 
 import os
 import sys
-import json
 import gzip
 import shutil
 import logging
 import argparse
 import configparser
-import multiprocessing
 from logging.handlers import TimedRotatingFileHandler
 
 

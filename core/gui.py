@@ -901,27 +901,39 @@ class RulescrapGUI:
             """Handle mouse wheel scrolling for settings"""
             try:
                 # Calculate scroll amount with improved sensitivity
-                if event.delta:
+                if hasattr(event, 'delta') and event.delta:
                     # Windows/Mac - event.delta is usually ±120
                     # Use 3 units per scroll for smoother experience
                     scroll_amount = -3 * (event.delta // 120)
-                else:
+                elif hasattr(event, 'num'):
                     # Linux - event.num is 4 (up) or 5 (down)
                     # Use 3 units for consistency
                     scroll_amount = -3 if event.num == 4 else 3
+                else:
+                    return "break"
                 
                 # Get the internal canvas of the scrollable frame
                 canvas = None
                 
-                # Try different ways to access the canvas
+                # Try multiple methods to find the canvas
                 if hasattr(self.settings_scroll, '_parent_canvas'):
                     canvas = self.settings_scroll._parent_canvas
-                elif hasattr(self.settings_scroll, 'winfo_children'):
-                    # Find canvas among children
-                    for child in self.settings_scroll.winfo_children():
-                        if isinstance(child, tk.Canvas):
-                            canvas = child
-                            break
+                
+                if not canvas:
+                    # Search through the widget hierarchy
+                    def find_canvas(widget):
+                        try:
+                            if isinstance(widget, tk.Canvas):
+                                return widget
+                            for child in widget.winfo_children():
+                                result = find_canvas(child)
+                                if result:
+                                    return result
+                        except:
+                            pass
+                        return None
+                    
+                    canvas = find_canvas(self.settings_scroll)
                 
                 # Scroll the canvas if found
                 if canvas and hasattr(canvas, 'yview_scroll'):
@@ -941,19 +953,45 @@ class RulescrapGUI:
             event.delta = -120
             return scroll_settings(event)
         
-        # Bind to the settings scroll frame directly for comprehensive coverage
-        try:
-            self.settings_scroll.bind("<MouseWheel>", scroll_settings, add="+")
-            self.settings_scroll.bind("<Button-4>", linux_scroll_up, add="+")
-            self.settings_scroll.bind("<Button-5>", linux_scroll_down, add="+")
-        except Exception:
-            pass
+        # Global scroll handler for settings area
+        def global_settings_scroll(event):
+            """Global scroll handler that only acts when mouse is over settings"""
+            try:
+                # Check if current tab is Settings
+                current_tab = self.tabview.get()
+                if current_tab != "Settings":
+                    return
+                
+                # Get mouse position
+                x, y = self.root.winfo_pointerxy()
+                widget_under_mouse = self.root.winfo_containing(x, y)
+                
+                # Check if mouse is over settings area
+                if widget_under_mouse and self._is_widget_in_settings(widget_under_mouse):
+                    return scroll_settings(event)
+            except Exception:
+                pass
+            return None
         
-        # Also bind to the settings tab itself
+        # Bind scroll events to multiple widgets for comprehensive coverage
+        widgets_to_bind = [
+            self.settings_scroll,
+            self.settings_tab
+        ]
+        
+        for widget in widgets_to_bind:
+            try:
+                widget.bind("<MouseWheel>", scroll_settings, add="+")
+                widget.bind("<Button-4>", linux_scroll_up, add="+")
+                widget.bind("<Button-5>", linux_scroll_down, add="+")
+            except Exception:
+                pass
+        
+        # Also bind globally to catch events when hovering over settings content
         try:
-            self.settings_tab.bind("<MouseWheel>", scroll_settings, add="+")
-            self.settings_tab.bind("<Button-4>", linux_scroll_up, add="+")
-            self.settings_tab.bind("<Button-5>", linux_scroll_down, add="+")
+            self.root.bind("<MouseWheel>", global_settings_scroll, add="+")
+            self.root.bind("<Button-4>", global_settings_scroll, add="+")
+            self.root.bind("<Button-5>", global_settings_scroll, add="+")
         except Exception:
             pass
     
@@ -1071,6 +1109,36 @@ class RulescrapGUI:
         self.root.bind("<Button-4>", self._global_scroll_handler, add="+")
         self.root.bind("<Button-5>", self._global_scroll_handler, add="+")
     
+    def _is_widget_in_settings(self, widget):
+        """Check if a widget is within the settings area"""
+        try:
+            # Get all widgets that are part of the settings area
+            settings_widgets = [self.settings_scroll, self.settings_tab]
+            
+            # Add main container if it exists
+            if hasattr(self, 'main_container'):
+                settings_widgets.append(self.main_container)
+            
+            # Recursively get all children of settings widgets
+            def get_all_descendants(parent):
+                descendants = [parent]
+                try:
+                    for child in parent.winfo_children():
+                        descendants.extend(get_all_descendants(child))
+                except:
+                    pass
+                return descendants
+            
+            all_settings_widgets = []
+            for settings_widget in settings_widgets:
+                all_settings_widgets.extend(get_all_descendants(settings_widget))
+            
+            # Check if the widget is in our settings area
+            return widget in all_settings_widgets
+            
+        except Exception:
+            return False
+
     def _bind_settings_scroll_events(self, widget):
         """Bind scroll events to a settings widget to enable scrolling when hovering over it"""
         def scroll_handler(event):
@@ -1082,17 +1150,28 @@ class RulescrapGUI:
                 elif hasattr(event, 'num'):
                     scroll_amount = -3 if event.num == 4 else 3
                 else:
-                    return
+                    return "break"
                 
                 # Find and scroll the canvas
                 canvas = None
                 if hasattr(self.settings_scroll, '_parent_canvas'):
                     canvas = self.settings_scroll._parent_canvas
-                elif hasattr(self.settings_scroll, 'winfo_children'):
-                    for child in self.settings_scroll.winfo_children():
-                        if isinstance(child, tk.Canvas):
-                            canvas = child
-                            break
+                
+                if not canvas:
+                    # Search for canvas in the widget hierarchy
+                    def find_canvas(widget):
+                        try:
+                            if isinstance(widget, tk.Canvas):
+                                return widget
+                            for child in widget.winfo_children():
+                                result = find_canvas(child)
+                                if result:
+                                    return result
+                        except:
+                            pass
+                        return None
+                    
+                    canvas = find_canvas(self.settings_scroll)
                 
                 if canvas and hasattr(canvas, 'yview_scroll'):
                     canvas.yview_scroll(scroll_amount, "units")
@@ -1264,36 +1343,450 @@ class RulescrapGUI:
         self.settings_tab.grid_columnconfigure(0, weight=1)
         self.settings_tab.grid_rowconfigure(0, weight=1)
         
-        # Create scrollable frame for settings
-        self.settings_scroll = ctk.CTkScrollableFrame(self.settings_tab, height=500)
-        self.settings_scroll.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        # Main settings container with larger height
+        main_container = ctk.CTkFrame(self.settings_tab)
+        main_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        main_container.grid_columnconfigure(0, weight=1)
+        main_container.grid_rowconfigure(1, weight=1)
+        
+        # Settings header with icon and description
+        header_frame = ctk.CTkFrame(main_container)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 10))
+        header_frame.grid_columnconfigure(1, weight=1)
+        
+        # Header text
+        header_text_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        header_text_frame.grid(row=0, column=1, sticky="ew", padx=10, pady=15)
+        
+        title_label = ctk.CTkLabel(header_text_frame, text="Settings & Configuration", 
+                                  font=ctk.CTkFont(size=24, weight="bold"))
+        title_label.pack(anchor="w")
+        
+        subtitle_label = ctk.CTkLabel(header_text_frame, 
+                                     text="Customize your Rulescrape experience", 
+                                     font=ctk.CTkFont(size=12), 
+                                     text_color="gray")
+        subtitle_label.pack(anchor="w", pady=(2, 0))
+        
+        # Create scrollable frame for settings with increased height
+        self.settings_scroll = ctk.CTkScrollableFrame(main_container, height=650)
+        self.settings_scroll.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 15))
         self.settings_scroll.grid_columnconfigure(0, weight=1)
         
         # Enable mouse wheel scrolling for settings
         self._setup_settings_scrolling()
         
-        sections = [
-            ("Download Settings", self.create_download_settings),
-            ("Blacklist Settings", self.create_blacklist_settings),
-            ("Interface Settings", self.create_interface_settings),
-            ("Advanced Settings", self.create_advanced_settings),
-        ]
+        # Make the settings scroll frame focusable to improve scrolling
+        try:
+            self.settings_scroll.focus_set()
+            # Configure the scrollable frame to be more responsive to mouse events
+            if hasattr(self.settings_scroll, 'configure'):
+                # Make sure the frame can receive focus and mouse events
+                pass
+        except Exception:
+            pass
+        
+        # Create settings sections with modern styling
+        self.create_modern_settings_sections()
+        
+        # Action buttons at the bottom
+        self.create_settings_action_bar(main_container)
+    
+    def create_modern_settings_sections(self):
+        """Create modern styled settings sections"""
+        
+        # Download Settings Section
+        download_section = self.create_settings_section("📥", "Download Settings", 
+                                                       "Configure download behavior and organization")
+        self.create_download_settings_modern(download_section)
+        
+        # Blacklist Settings Section  
+        blacklist_section = self.create_settings_section("🚫", "Blacklist Settings",
+                                                        "Manage content filtering and blocked tags")
+        self.create_blacklist_settings_modern(blacklist_section)
+        
+        # Interface Settings Section
+        interface_section = self.create_settings_section("🎨", "Interface Settings",
+                                                        "Customize appearance and gallery options")
+        self.create_interface_settings_modern(interface_section)
+        
+        # Performance Settings Section
+        performance_section = self.create_settings_section("⚡", "Performance Settings",
+                                                          "Optimize caching and thumbnail generation")
+        self.create_performance_settings_modern(performance_section)
+        
+        # Advanced Settings Section
+        advanced_section = self.create_settings_section("🔧", "Advanced Options",
+                                                       "Import/export settings and system configuration")
+        self.create_advanced_settings_modern(advanced_section)
+        
+        # After all sections are created, bind scroll events to everything
+        def bind_all_scroll_events():
+            try:
+                # Bind to the main settings scroll area
+                self._bind_scroll_to_all_children(self.settings_scroll)
+                
+                # Also bind to the settings tab itself
+                self._bind_settings_scroll_events(self.settings_tab)
+                
+            except Exception as e:
+                print(f"Warning: Could not bind all scroll events: {e}")
+        
+        # Schedule after all widgets are created
+        self.root.after(100, bind_all_scroll_events)
+    
+    def create_settings_section(self, icon, title, description):
+        """Create a modern settings section with header"""
+        section_frame = ctk.CTkFrame(self.settings_scroll)
+        section_frame.grid(row=len(self.settings_scroll.winfo_children()), column=0, 
+                          sticky="ew", padx=10, pady=15)
+        section_frame.grid_columnconfigure(0, weight=1)
+        
+        # Section header
+        header_frame = ctk.CTkFrame(section_frame, fg_color="transparent")
+        header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(20, 15))
+        header_frame.grid_columnconfigure(1, weight=1)
+        
+        # Icon
+        icon_label = ctk.CTkLabel(header_frame, text=icon, font=ctk.CTkFont(size=24))
+        icon_label.grid(row=0, column=0, padx=(0, 15))
+        
+        # Title and description
+        text_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        text_frame.grid(row=0, column=1, sticky="ew")
+        
+        title_label = ctk.CTkLabel(text_frame, text=title, 
+                                  font=ctk.CTkFont(size=16, weight="bold"))
+        title_label.pack(anchor="w")
+        
+        desc_label = ctk.CTkLabel(text_frame, text=description,
+                                 font=ctk.CTkFont(size=11), text_color="gray")
+        desc_label.pack(anchor="w", pady=(2, 0))
+        
+        # Content frame
+        content_frame = ctk.CTkFrame(section_frame, fg_color="transparent")
+        content_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
+        content_frame.grid_columnconfigure(1, weight=1)
+        
+        # Bind scroll events to all elements in this section
+        self._bind_scroll_to_all_children(section_frame)
+        
+        # Schedule binding for children that will be added later
+        def bind_after_creation():
+            try:
+                self._bind_scroll_to_all_children(content_frame)
+            except Exception:
+                pass
+        
+        # Use after_idle to ensure child widgets are created before binding
+        self.root.after_idle(bind_after_creation)
+        
+        return content_frame
+    
+    def create_download_settings_modern(self, parent):
+        """Modern download settings section"""
+        row = 0
+        
+        # Output directory with enhanced layout
+        self.create_setting_row(parent, row, "📁", "Output Directory", 
+                               "Where downloaded files will be saved")
+        
+        dir_frame = ctk.CTkFrame(parent)
+        dir_frame.grid(row=row+1, column=0, columnspan=3, sticky="ew", padx=20, pady=(5, 15))
+        dir_frame.grid_columnconfigure(0, weight=1)
+        
+        self.output_dir_var = ctk.StringVar(value=self.settings["output_dir"])
+        dir_entry = ctk.CTkEntry(dir_frame, textvariable=self.output_dir_var, height=32)
+        dir_entry.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
+        browse_btn = ctk.CTkButton(dir_frame, text="📂 Browse", command=self.browse_output_dir, 
+                                  width=100, height=32)
+        browse_btn.grid(row=0, column=1, padx=(5, 10), pady=10)
+        row += 2
+        
+        # Max workers with slider and value display
+        self.create_setting_row(parent, row, "🤖", "Download Threads", 
+                               "Number of simultaneous downloads")
+        
+        workers_frame = ctk.CTkFrame(parent)
+        workers_frame.grid(row=row+1, column=0, columnspan=3, sticky="ew", padx=20, pady=(5, 15))
+        workers_frame.grid_columnconfigure(1, weight=1)
+        
+        self.max_workers_var = ctk.IntVar(value=self.settings["max_workers"])
+        workers_value_label = ctk.CTkLabel(workers_frame, text=str(self.max_workers_var.get()),
+                                          font=ctk.CTkFont(size=14, weight="bold"))
+        workers_value_label.grid(row=0, column=0, padx=10, pady=10)
+        
+        workers_slider = ctk.CTkSlider(workers_frame, from_=1, to=16, variable=self.max_workers_var, 
+                                      number_of_steps=15, height=20,
+                                      command=lambda v: workers_value_label.configure(text=str(int(float(v)))))
+        workers_slider.grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+        
+        workers_desc = ctk.CTkLabel(workers_frame, text="threads", font=ctk.CTkFont(size=12), 
+                                   text_color="gray")
+        workers_desc.grid(row=0, column=2, padx=10, pady=10)
+        row += 2
+        
+        # Organization method with modern dropdown
+        self.create_setting_row(parent, row, "📂", "File Organization", 
+                               "How to organize downloaded files into folders")
+        
+        self.org_method_var = ctk.StringVar(value=self.settings["org_method"])
+        org_menu = ctk.CTkOptionMenu(
+            parent, 
+            variable=self.org_method_var,
+            values=["By extension and first tag", "By extension only", "By tag only", "Flat (no folders)"],
+            width=300, height=32
+        )
+        org_menu.grid(row=row+1, column=0, columnspan=3, sticky="w", padx=20, pady=(5, 15))
+        row += 2
+    
+    def create_blacklist_settings_modern(self, parent):
+        """Modern blacklist settings section"""
+        # Import blacklist manager
+        from .blacklist import get_blacklist_manager
+        
+        # Initialize blacklist manager if not already done
+        if not hasattr(self, 'blacklist_manager'):
+            self.blacklist_manager = get_blacklist_manager()
         
         row = 0
-        for title, creator in sections:
-            frame = ctk.CTkFrame(self.settings_scroll)
-            frame.grid(row=row, column=0, sticky="ew", padx=10, pady=10)
-            frame.grid_columnconfigure(1, weight=1)
-            
-            ctk.CTkLabel(frame, text=title, 
-                        font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=2, pady=10)
-            
-            creator(frame)
-            
-            # Recursively bind scroll events to all widgets in this section
-            self._bind_scroll_to_all_children(frame)
-            
-            row += 1
+        blacklist_stats = self.blacklist_manager.get_blacklist_stats()
+        
+        # Enable/disable blacklist
+        blacklist_frame = ctk.CTkFrame(parent)
+        blacklist_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        
+        self.blacklist_enabled_var = ctk.BooleanVar(value=blacklist_stats['enabled'])
+        enable_switch = ctk.CTkSwitch(blacklist_frame, text="Enable Content Filtering", 
+                                     variable=self.blacklist_enabled_var,
+                                     command=self.on_blacklist_toggle,
+                                     font=ctk.CTkFont(size=14))
+        enable_switch.grid(row=0, column=0, padx=15, pady=15, sticky="w")
+        
+        # Case sensitivity
+        self.blacklist_case_var = ctk.BooleanVar(value=blacklist_stats['case_sensitive'])
+        case_switch = ctk.CTkSwitch(blacklist_frame, text="Case Sensitive Matching",
+                                   variable=self.blacklist_case_var,
+                                   command=self.on_blacklist_case_toggle,
+                                   font=ctk.CTkFont(size=14))
+        case_switch.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="w")
+        row += 1
+        
+        # Stats display
+        stats_frame = ctk.CTkFrame(parent)
+        stats_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        stats_frame.grid_columnconfigure(0, weight=1)
+        
+        self.blacklist_stats_label = ctk.CTkLabel(
+            stats_frame,
+            text=f"📊 {blacklist_stats['total_tags']} tags blocked ({blacklist_stats['tag_groups']} groups)",
+            font=ctk.CTkFont(size=13)
+        )
+        self.blacklist_stats_label.grid(row=0, column=0, padx=15, pady=15)
+        row += 1
+        
+        # Quick add tag
+        add_frame = ctk.CTkFrame(parent)
+        add_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        add_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(add_frame, text="➕", font=ctk.CTkFont(size=16)).grid(row=0, column=0, padx=15, pady=10)
+        
+        self.blacklist_tag_entry = ctk.CTkEntry(add_frame, placeholder_text="Add tag to blacklist...", height=32)
+        self.blacklist_tag_entry.grid(row=0, column=1, sticky="ew", padx=10, pady=10)
+        self.blacklist_tag_entry.bind("<Return>", self.on_add_blacklist_tag)
+        
+        add_tag_btn = ctk.CTkButton(add_frame, text="Add", command=self.on_add_blacklist_tag, 
+                                   width=80, height=32)
+        add_tag_btn.grid(row=0, column=2, padx=(5, 15), pady=10)
+        row += 1
+        
+        # Management buttons
+        buttons_frame = ctk.CTkFrame(parent)
+        buttons_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        
+        button_configs = [
+            ("📋 View All", self.show_blacklist_viewer),
+            ("📝 Edit File", self.edit_blacklist_file),
+            ("📥 Import", self.import_blacklist),
+            ("📤 Export", self.export_blacklist)
+        ]
+        
+        for i, (text, command) in enumerate(button_configs):
+            btn = ctk.CTkButton(buttons_frame, text=text, command=command, 
+                               width=120, height=32)
+            btn.grid(row=0, column=i, padx=10, pady=15)
+    
+    def create_interface_settings_modern(self, parent):
+        """Modern interface settings section"""
+        row = 0
+        
+        # Gallery settings group
+        gallery_frame = ctk.CTkFrame(parent)
+        gallery_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        gallery_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(gallery_frame, text="🖼️ Gallery Settings", 
+                    font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=(15, 10))
+        
+        # Gallery image limit
+        ctk.CTkLabel(gallery_frame, text="Max Images:").grid(row=1, column=0, padx=15, pady=5, sticky="w")
+        self.gallery_limit_var = ctk.StringVar(value=str(self.settings["gallery_image_limit"]))
+        gallery_entry = ctk.CTkEntry(gallery_frame, textvariable=self.gallery_limit_var, 
+                                    width=100, height=32)
+        gallery_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        
+        gallery_tip = ctk.CTkLabel(gallery_frame, text="(1-2000, >500 uses pagination)", 
+                                  font=ctk.CTkFont(size=10), text_color="gray")
+        gallery_tip.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        
+        # Images per page
+        ctk.CTkLabel(gallery_frame, text="Per Page:").grid(row=2, column=0, padx=15, pady=5, sticky="w")
+        self.gallery_page_size_var = ctk.StringVar(value=str(self.settings.get("gallery_page_size", 200)))
+        page_size_entry = ctk.CTkEntry(gallery_frame, textvariable=self.gallery_page_size_var, 
+                                      width=100, height=32)
+        page_size_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
+        
+        page_tip = ctk.CTkLabel(gallery_frame, text="(50-500, for large galleries)", 
+                               font=ctk.CTkFont(size=10), text_color="gray")
+        page_tip.grid(row=2, column=2, padx=5, pady=(5, 15), sticky="w")
+        row += 1
+        
+        # UI preferences
+        ui_frame = ctk.CTkFrame(parent)
+        ui_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        
+        ctk.CTkLabel(ui_frame, text="🔍 Interface Options", 
+                    font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=2, padx=15, pady=(15, 10))
+        
+        self.confirm_exit_var = ctk.BooleanVar(value=self.settings["confirm_exit"])
+        confirm_switch = ctk.CTkSwitch(ui_frame, text="Confirm before closing application", 
+                                      variable=self.confirm_exit_var,
+                                      font=ctk.CTkFont(size=12))
+        confirm_switch.grid(row=1, column=0, padx=15, pady=5, sticky="w")
+        
+        # History limit
+        ctk.CTkLabel(ui_frame, text="History Limit:").grid(row=2, column=0, padx=15, pady=5, sticky="w")
+        self.history_limit_var = ctk.StringVar(value=str(self.settings["download_history_limit"]))
+        history_entry = ctk.CTkEntry(ui_frame, textvariable=self.history_limit_var, 
+                                    width=100, height=32)
+        history_entry.grid(row=2, column=1, sticky="w", padx=10, pady=(5, 15))
+    
+    def create_performance_settings_modern(self, parent):
+        """Modern performance settings section"""
+        row = 0
+        
+        # Cache settings
+        cache_frame = ctk.CTkFrame(parent)
+        cache_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        cache_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(cache_frame, text="💾 Thumbnail Cache", 
+                    font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=(15, 10))
+        
+        # Cache size
+        ctk.CTkLabel(cache_frame, text="Disk Cache Size:").grid(row=1, column=0, padx=15, pady=5, sticky="w")
+        self.cache_size_var = ctk.StringVar(value=str(self.settings["thumbnail_cache_size"]))
+        cache_entry = ctk.CTkEntry(cache_frame, textvariable=self.cache_size_var, 
+                                  width=100, height=32)
+        cache_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        
+        ctk.CTkLabel(cache_frame, text="MB", font=ctk.CTkFont(size=12), 
+                    text_color="gray").grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        
+        # Worker threads
+        ctk.CTkLabel(cache_frame, text="Worker Threads:").grid(row=2, column=0, padx=15, pady=5, sticky="w")
+        self.workers_var = ctk.StringVar(value=str(self.settings["thumbnail_workers"]))
+        workers_entry = ctk.CTkEntry(cache_frame, textvariable=self.workers_var, 
+                                    width=100, height=32)
+        workers_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
+        
+        # Batch size
+        ctk.CTkLabel(cache_frame, text="Batch Size:").grid(row=3, column=0, padx=15, pady=5, sticky="w")
+        self.batch_size_var = ctk.StringVar(value=str(self.settings["gallery_batch_size"]))
+        batch_entry = ctk.CTkEntry(cache_frame, textvariable=self.batch_size_var, 
+                                  width=100, height=32)
+        batch_entry.grid(row=3, column=1, sticky="w", padx=10, pady=(5, 15))
+        row += 1
+        
+        # Cache management buttons
+        buttons_frame = ctk.CTkFrame(parent)
+        buttons_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        
+        cache_buttons = [
+            ("🗑️ Clear Cache", self.clear_thumbnail_cache),
+            ("📊 Cache Stats", self.show_cache_stats),
+            ("🔧 Optimize", self.optimize_cache)
+        ]
+        
+        for i, (text, command) in enumerate(cache_buttons):
+            btn = ctk.CTkButton(buttons_frame, text=text, command=command, 
+                               width=130, height=32)
+            btn.grid(row=0, column=i, padx=10, pady=15)
+    
+    def create_advanced_settings_modern(self, parent):
+        """Modern advanced settings section"""
+        row = 0
+        
+        # Settings management
+        settings_frame = ctk.CTkFrame(parent)
+        settings_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        
+        ctk.CTkLabel(settings_frame, text="🛠️ Settings Management", 
+                    font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=4, padx=15, pady=(15, 10))
+        
+        settings_buttons = [
+            ("💾 Save All", self.save_all_settings, "Save current settings"),
+            ("🔄 Reset", self.reset_settings, "Reset to defaults"),
+            ("📤 Export", self.export_settings, "Export to file"),
+            ("📥 Import", self.import_settings, "Import from file")
+        ]
+        
+        for i, (text, command, tooltip) in enumerate(settings_buttons):
+            btn = ctk.CTkButton(settings_frame, text=text, command=command, 
+                               width=110, height=40)
+            btn.grid(row=1, column=i, padx=10, pady=(5, 15))
+    
+    def create_settings_action_bar(self, parent):
+        """Create action bar at bottom of settings"""
+        action_frame = ctk.CTkFrame(parent)
+        action_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 15))
+        action_frame.grid_columnconfigure(1, weight=1)
+        
+        # Status indicator
+        status_frame = ctk.CTkFrame(action_frame, fg_color="transparent")
+        status_frame.grid(row=0, column=0, padx=15, pady=10)
+        
+        self.settings_status_label = ctk.CTkLabel(status_frame, text="✅ Settings loaded", 
+                                                 font=ctk.CTkFont(size=12), text_color="green")
+        self.settings_status_label.pack()
+        
+        # Primary action button
+        save_all_btn = ctk.CTkButton(action_frame, text="💾 Apply & Save All Settings", 
+                                    command=self.save_all_settings,
+                                    width=200, height=40,
+                                    font=ctk.CTkFont(size=14, weight="bold"))
+        save_all_btn.grid(row=0, column=2, padx=15, pady=10)
+    
+    def create_setting_row(self, parent, row, icon, title, description):
+        """Helper method to create a consistent setting row"""
+        # Icon
+        icon_label = ctk.CTkLabel(parent, text=icon, font=ctk.CTkFont(size=16))
+        icon_label.grid(row=row, column=0, padx=(20, 10), pady=10, sticky="w")
+        
+        # Title and description
+        text_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        text_frame.grid(row=row, column=1, sticky="ew", padx=10, pady=10)
+        
+        title_label = ctk.CTkLabel(text_frame, text=title, 
+                                  font=ctk.CTkFont(size=14, weight="bold"))
+        title_label.pack(anchor="w")
+        
+        if description:
+            desc_label = ctk.CTkLabel(text_frame, text=description,
+                                     font=ctk.CTkFont(size=11), text_color="gray")
+            desc_label.pack(anchor="w", pady=(2, 0))
     
     def _bind_scroll_to_all_children(self, parent_widget):
         """Recursively bind scroll events to all child widgets"""
@@ -1302,10 +1795,16 @@ class RulescrapGUI:
             self._bind_settings_scroll_events(parent_widget)
             
             # Recursively bind to all children
-            for child in parent_widget.winfo_children():
-                self._bind_settings_scroll_events(child)
-                # Recursively process grandchildren
-                self._bind_scroll_to_all_children(child)
+            def bind_recursive(widget):
+                try:
+                    self._bind_settings_scroll_events(widget)
+                    for child in widget.winfo_children():
+                        bind_recursive(child)
+                except Exception:
+                    pass
+            
+            bind_recursive(parent_widget)
+            
         except Exception:
             # Handle any widget traversal errors silently
             pass
@@ -1340,162 +1839,48 @@ class RulescrapGUI:
             values=["By extension and first tag", "By extension only", "By tag only", "Flat (no folders)"]
         )
         org_menu.grid(row=3, column=1, sticky="ew", padx=10, pady=5)
-    
-    def create_blacklist_settings(self, parent):
-        """Create blacklist management settings section"""
-        # Import blacklist manager
-        from .blacklist import get_blacklist_manager
+        # Output directory
+        ctk.CTkLabel(parent, text="Output Directory:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         
-        # Initialize blacklist manager
-        self.blacklist_manager = get_blacklist_manager()
+        dir_frame = ctk.CTkFrame(parent)
+        dir_frame.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+        dir_frame.grid_columnconfigure(0, weight=1)
         
-        # Blacklist enable/disable
-        blacklist_stats = self.blacklist_manager.get_blacklist_stats()
-        self.blacklist_enabled_var = ctk.BooleanVar(value=blacklist_stats['enabled'])
+        self.output_dir_var = ctk.StringVar(value=self.settings["output_dir"])
+        dir_entry = ctk.CTkEntry(dir_frame, textvariable=self.output_dir_var)
+        dir_entry.grid(row=0, column=0, sticky="ew", padx=5)
         
-        enable_checkbox = ctk.CTkCheckBox(
+        browse_btn = ctk.CTkButton(dir_frame, text="Browse", command=self.browse_output_dir, width=80)
+        browse_btn.grid(row=0, column=1, padx=5)
+        
+        # Max workers
+        ctk.CTkLabel(parent, text="Max Workers:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.max_workers_var = ctk.IntVar(value=self.settings["max_workers"])
+        workers_slider = ctk.CTkSlider(parent, from_=1, to=16, variable=self.max_workers_var, number_of_steps=15)
+        workers_slider.grid(row=2, column=1, sticky="ew", padx=10, pady=5)
+        
+        # Organization method
+        ctk.CTkLabel(parent, text="Organization:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        self.org_method_var = ctk.StringVar(value=self.settings["org_method"])
+        org_menu = ctk.CTkOptionMenu(
             parent, 
-            text="Enable Blacklist Filtering", 
-            variable=self.blacklist_enabled_var,
-            command=self.on_blacklist_toggle
+            variable=self.org_method_var,
+            values=["By extension and first tag", "By extension only", "By tag only", "Flat (no folders)"]
         )
-        enable_checkbox.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="w")
-        
-        # Case sensitivity
-        self.blacklist_case_var = ctk.BooleanVar(value=blacklist_stats['case_sensitive'])
-        case_checkbox = ctk.CTkCheckBox(
-            parent,
-            text="Case Sensitive Matching",
-            variable=self.blacklist_case_var,
-            command=self.on_blacklist_case_toggle
-        )
-        case_checkbox.grid(row=2, column=0, columnspan=2, padx=10, pady=5, sticky="w")
-        
-        # Blacklist stats display
-        stats_frame = ctk.CTkFrame(parent)
-        stats_frame.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
-        
-        self.blacklist_stats_label = ctk.CTkLabel(
-            stats_frame,
-            text=f"📊 {blacklist_stats['total_tags']} blacklisted tags ({blacklist_stats['tag_groups']} groups)",
-            font=ctk.CTkFont(size=12)
-        )
-        self.blacklist_stats_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        
-        # Tag management section
-        tag_frame = ctk.CTkFrame(parent)
-        tag_frame.grid(row=4, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
-        tag_frame.grid_columnconfigure(1, weight=1)
-        
-        ctk.CTkLabel(tag_frame, text="Add Tag:", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        
-        self.blacklist_tag_entry = ctk.CTkEntry(tag_frame, placeholder_text="Enter tag to blacklist...")
-        self.blacklist_tag_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
-        self.blacklist_tag_entry.bind("<Return>", self.on_add_blacklist_tag)
-        
-        add_tag_btn = ctk.CTkButton(tag_frame, text="Add", command=self.on_add_blacklist_tag, width=60)
-        add_tag_btn.grid(row=0, column=2, padx=5, pady=5)
-        
-        # Blacklist management buttons
-        button_frame = ctk.CTkFrame(parent)
-        button_frame.grid(row=5, column=0, columnspan=2, padx=10, pady=10)
-        
-        view_btn = ctk.CTkButton(button_frame, text="📋 View Blacklist", command=self.show_blacklist_viewer)
-        view_btn.grid(row=0, column=0, padx=5)
-        
-        edit_btn = ctk.CTkButton(button_frame, text="📝 Edit File", command=self.edit_blacklist_file)
-        edit_btn.grid(row=0, column=1, padx=5)
-        
-        import_btn = ctk.CTkButton(button_frame, text="📥 Import", command=self.import_blacklist)
-        import_btn.grid(row=0, column=2, padx=5)
-        
-        export_btn = ctk.CTkButton(button_frame, text="📤 Export", command=self.export_blacklist)
-        export_btn.grid(row=0, column=3, padx=5)
+        org_menu.grid(row=3, column=1, sticky="ew", padx=10, pady=5)
+    
+    # Legacy settings methods - replaced by modern versions above
+    def create_blacklist_settings(self, parent):
+        """Legacy blacklist settings - now handled by create_blacklist_settings_modern"""
+        pass
     
     def create_interface_settings(self, parent):
-        self.confirm_exit_var = ctk.BooleanVar(value=self.settings["confirm_exit"])
-        confirm_checkbox = ctk.CTkCheckBox(parent, text="Confirm before exit", 
-                       variable=self.confirm_exit_var)
-        confirm_checkbox.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="w")
-        
-        ctk.CTkLabel(parent, text="History Limit:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.history_limit_var = ctk.StringVar(value=str(self.settings["download_history_limit"]))
-        history_entry = ctk.CTkEntry(parent, textvariable=self.history_limit_var, width=100)
-        history_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
-        
-        ctk.CTkLabel(parent, text="Gallery Image Limit:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.gallery_limit_var = ctk.StringVar(value=str(self.settings["gallery_image_limit"]))
-        gallery_entry = ctk.CTkEntry(parent, textvariable=self.gallery_limit_var, width=100)
-        gallery_entry.grid(row=3, column=1, sticky="w", padx=10, pady=5)
-        
-        # Add tooltip for gallery limit
-        gallery_tip = ctk.CTkLabel(parent, text="(1-2000, >500 uses pagination)", 
-                                  font=("Arial", 10), text_color="gray")
-        gallery_tip.grid(row=3, column=2, padx=5, pady=5, sticky="w")
-        
-        # Gallery pagination settings
-        ctk.CTkLabel(parent, text="Images per page:").grid(row=4, column=0, padx=10, pady=5, sticky="w")
-        self.gallery_page_size_var = ctk.StringVar(value=str(self.settings.get("gallery_page_size", 200)))
-        page_size_entry = ctk.CTkEntry(parent, textvariable=self.gallery_page_size_var, width=100)
-        page_size_entry.grid(row=4, column=1, sticky="w", padx=10, pady=5)
-        
-        page_tip = ctk.CTkLabel(parent, text="(50-500, for large galleries)", 
-                               font=("Arial", 10), text_color="gray")
-        page_tip.grid(row=4, column=2, padx=5, pady=5, sticky="w")
-        
-        # Performance Settings Section
-        perf_frame = ctk.CTkFrame(parent)
-        perf_frame.grid(row=5, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
-        
-        ctk.CTkLabel(perf_frame, text="Performance Settings", 
-                    font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=2, padx=10, pady=5)
-        
-        ctk.CTkLabel(perf_frame, text="Disk Cache Size (MB):").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.cache_size_var = ctk.StringVar(value=str(self.settings["thumbnail_cache_size"]))
-        cache_entry = ctk.CTkEntry(perf_frame, textvariable=self.cache_size_var, width=100)
-        cache_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
-        
-        ctk.CTkLabel(perf_frame, text="Thumbnail Workers:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.workers_var = ctk.StringVar(value=str(self.settings["thumbnail_workers"]))
-        workers_entry = ctk.CTkEntry(perf_frame, textvariable=self.workers_var, width=100)
-        workers_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
-        
-        ctk.CTkLabel(perf_frame, text="Gallery Batch Size:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.batch_size_var = ctk.StringVar(value=str(self.settings["gallery_batch_size"]))
-        batch_entry = ctk.CTkEntry(perf_frame, textvariable=self.batch_size_var, width=100)
-        batch_entry.grid(row=3, column=1, sticky="w", padx=10, pady=5)
-        
-        # Cache management buttons
-        cache_btn_frame = ctk.CTkFrame(perf_frame)
-        cache_btn_frame.grid(row=4, column=0, columnspan=2, pady=10)
-        
-        clear_cache_btn = ctk.CTkButton(cache_btn_frame, text="Clear Cache", 
-                                       command=self.clear_thumbnail_cache)
-        clear_cache_btn.grid(row=0, column=0, padx=5)
-        
-        cache_stats_btn = ctk.CTkButton(cache_btn_frame, text="Cache Stats", 
-                                       command=self.show_cache_stats)
-        cache_stats_btn.grid(row=0, column=1, padx=5)
-        
-        optimize_cache_btn = ctk.CTkButton(cache_btn_frame, text="Optimize Cache", 
-                                          command=self.optimize_cache)
-        optimize_cache_btn.grid(row=0, column=2, padx=5)
+        """Legacy interface settings - now handled by create_interface_settings_modern"""
+        pass
     
     def create_advanced_settings(self, parent):
-        button_frame = ctk.CTkFrame(parent)
-        button_frame.grid(row=1, column=0, columnspan=2, pady=10)
-        
-        save_btn = ctk.CTkButton(button_frame, text="💾 Save Settings", command=self.save_all_settings)
-        save_btn.grid(row=0, column=0, padx=10)
-        
-        reset_btn = ctk.CTkButton(button_frame, text="🔄 Reset to Defaults", command=self.reset_settings)
-        reset_btn.grid(row=0, column=1, padx=10)
-        
-        export_settings_btn = ctk.CTkButton(button_frame, text="📤 Export Settings", command=self.export_settings)
-        export_settings_btn.grid(row=0, column=2, padx=10)
-        
-        import_settings_btn = ctk.CTkButton(button_frame, text="📥 Import Settings", command=self.import_settings)
-        import_settings_btn.grid(row=0, column=3, padx=10)
+        """Legacy advanced settings - now handled by create_advanced_settings_modern"""
+        pass
     
     def create_status_bar(self):
         self.status_frame = ctk.CTkFrame(self.root, height=30)
@@ -2198,6 +2583,10 @@ class RulescrapGUI:
     def save_all_settings(self):
         """Save all settings"""
         try:
+            # Update settings status
+            if hasattr(self, 'settings_status_label'):
+                self.settings_status_label.configure(text="💾 Saving settings...", text_color="orange")
+            
             # Update settings from UI with safe integer conversion
             history_limit = self.validate_int_entry(self.history_limit_var.get(), default=100, min_val=1, max_val=10000)
             if history_limit != int(self.history_limit_var.get() or "100"):
@@ -2262,15 +2651,32 @@ class RulescrapGUI:
                 self.gallery_loader.batch_size = batch_size
             
             self.save_settings()
+            
+            # Update status to success
+            if hasattr(self, 'settings_status_label'):
+                self.settings_status_label.configure(text="✅ Settings saved successfully!", text_color="green")
+                # Reset to normal after 3 seconds
+                self.root.after(3000, lambda: self.settings_status_label.configure(text="✅ Settings loaded", text_color="green"))
+            
             messagebox.showinfo("Success", "Settings saved successfully!")
             self.log_message("💾 Settings saved successfully")
         except Exception as e:
+            # Update status to error
+            if hasattr(self, 'settings_status_label'):
+                self.settings_status_label.configure(text="❌ Error saving settings", text_color="red")
+                self.root.after(3000, lambda: self.settings_status_label.configure(text="✅ Settings loaded", text_color="green"))
+            
             messagebox.showerror("Error", f"Could not save settings: {e}")
+            self.log_message(f"❌ Error saving settings: {e}")
     
     def reset_settings(self):
         """Reset settings to defaults"""
         if messagebox.askyesno("Confirm", "Reset all settings to defaults?"):
             try:
+                # Update status
+                if hasattr(self, 'settings_status_label'):
+                    self.settings_status_label.configure(text="🔄 Resetting settings...", text_color="orange")
+                
                 # Reset to default values
                 default_settings = {
                     "theme": "dark",
@@ -2281,6 +2687,7 @@ class RulescrapGUI:
                     "confirm_exit": True,
                     "download_history_limit": 100,
                     "gallery_image_limit": 50,
+                    "gallery_page_size": 200,
                     # Performance settings
                     "thumbnail_cache_size": 500,
                     "thumbnail_workers": min(8, (os.cpu_count() or 1) + 4),
@@ -2297,15 +2704,27 @@ class RulescrapGUI:
                 self.confirm_exit_var.set(default_settings["confirm_exit"])
                 self.history_limit_var.set(str(default_settings["download_history_limit"]))
                 self.gallery_limit_var.set(str(default_settings["gallery_image_limit"]))
+                self.gallery_page_size_var.set(str(default_settings["gallery_page_size"]))
                 # Update performance settings UI
                 self.cache_size_var.set(str(default_settings["thumbnail_cache_size"]))
                 self.workers_var.set(str(default_settings["thumbnail_workers"]))
                 self.batch_size_var.set(str(default_settings["gallery_batch_size"]))
                 
                 self.save_settings()
+                
+                # Update status to success
+                if hasattr(self, 'settings_status_label'):
+                    self.settings_status_label.configure(text="✅ Settings reset to defaults!", text_color="green")
+                    self.root.after(3000, lambda: self.settings_status_label.configure(text="✅ Settings loaded", text_color="green"))
+                
                 messagebox.showinfo("Success", "Settings reset to defaults!")
                 self.log_message("🔄 Settings reset to defaults")
             except Exception as e:
+                # Update status to error
+                if hasattr(self, 'settings_status_label'):
+                    self.settings_status_label.configure(text="❌ Error resetting settings", text_color="red")
+                    self.root.after(3000, lambda: self.settings_status_label.configure(text="✅ Settings loaded", text_color="green"))
+                
                 messagebox.showerror("Error", f"Could not reset settings: {e}")
                 self.log_message(f"❌ Error resetting settings: {e}")
     
@@ -2546,6 +2965,19 @@ class RulescrapGUI:
     def show_settings_tab(self):
         """Show settings tab"""
         self.tabview.set("Settings")
+        # Refresh scroll bindings when settings tab is shown
+        self.root.after(50, self._refresh_settings_scroll_bindings)
+    
+    def _refresh_settings_scroll_bindings(self):
+        """Refresh scroll bindings for the settings tab"""
+        try:
+            if hasattr(self, 'settings_scroll'):
+                # Make the settings scroll frame focusable
+                self.settings_scroll.focus_set()
+                # Re-bind scroll events to ensure they're working
+                self._bind_scroll_to_all_children(self.settings_scroll)
+        except Exception:
+            pass
     
     def on_tab_change(self):
         """Handle tab change events"""
