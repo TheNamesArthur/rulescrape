@@ -313,11 +313,12 @@ ImportError: No module named 'customtkinter'
 ## 🆚 Architecture Overview
 
 ### Core Modules (V1.5):
-- **`core/gui.py`** (3,128 lines) - Modern CustomTkinter interface with tabbed design
+- **`core/gui.py`** (4,204 lines) - Modern CustomTkinter interface with tabbed design
 - **`core/download.py`** (677 lines) - Unified download management with threading support
-- **`core/thumbnail_cache.py`** (559 lines) - Disk-based caching system with LRU eviction
+- **`core/thumbnail_cache.py`** (637 lines) - Disk-based caching system with LRU eviction and WebP optimization
 - **`core/blacklist.py`** (547 lines) - Comprehensive tag filtering and CLI management
-- **`core/booru_api.py`** (357 lines) - Multi-site API integration (rule34, danbooru, etc.)
+- **`core/booru_api.py`** (475 lines) - Multi-site API integration with authentication support
+- **`core/auth.py`** (299 lines) - Encrypted credential management with master password protection
 - **`core/animated_preview.py`** (290 lines) - GIF/video animation system with frame caching
 - **`core/dupe_check.py`** (257 lines) - MD5-based duplicate detection with multithreading
 
