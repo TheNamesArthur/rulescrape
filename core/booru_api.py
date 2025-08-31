@@ -11,6 +11,95 @@ import string
 # Module logger - will use the main application's logging configuration
 logger = logging.getLogger("booru_api")
 
+def get_auth_headers(booru_type):
+    """Get authentication headers for a booru if credentials are available"""
+    try:
+        from .auth import get_auth_manager
+        auth_manager = get_auth_manager()
+        
+        if not auth_manager._master_password:
+            return {}
+        
+        # Map API booru names to auth system names
+        auth_booru_name = map_booru_name_for_auth(booru_type)
+        credentials = auth_manager.get_credentials(auth_booru_name)
+        if not credentials:
+            return {}
+        
+        headers = {}
+        
+        # Handle different authentication methods
+        if auth_booru_name == 'rule34.xxx':
+            # Rule34.xxx uses API key in URL parameters (handled in params)
+            pass
+        elif auth_booru_name == 'e621':
+            # E621 uses custom user-agent with username
+            username = credentials.get('username', '')
+            if username:
+                headers['User-Agent'] = f"rulescrape/1.5 (by {username})"
+        elif auth_booru_name == 'danbooru':
+            # Danbooru uses API key and username
+            api_key = credentials.get('api_key', '')
+            username = credentials.get('username', '')
+            if api_key and username:
+                headers['Authorization'] = f'Basic {api_key}:{username}'
+        
+        return headers
+        
+    except ImportError:
+        # Auth module not available
+        return {}
+    except Exception as e:
+        logger.warning(f"Failed to get auth headers for {booru_type}: {e}")
+        return {}
+
+def get_auth_params(booru_type, base_params):
+    """Add authentication parameters to API request if credentials are available"""
+    try:
+        from .auth import get_auth_manager
+        auth_manager = get_auth_manager()
+        
+        if not auth_manager._master_password:
+            return base_params
+        
+        # Map API booru names to auth system names
+        auth_booru_name = map_booru_name_for_auth(booru_type)
+        credentials = auth_manager.get_credentials(auth_booru_name)
+        if not credentials:
+            return base_params
+        
+        # Handle different authentication methods
+        if auth_booru_name == 'rule34.xxx':
+            # Rule34.xxx API key and user ID in URL parameters
+            api_key = credentials.get('api_key', '')
+            user_id = credentials.get('user_id', '')
+            if api_key and user_id:
+                base_params.update({
+                    'api_key': api_key,
+                    'user_id': user_id
+                })
+        
+        return base_params
+        
+    except ImportError:
+        # Auth module not available
+        return base_params
+    except Exception as e:
+        logger.warning(f"Failed to get auth params for {booru_type}: {e}")
+        return base_params
+
+def map_booru_name_for_auth(api_booru_name):
+    """Map API booru names to authentication system names"""
+    mapping = {
+        'rule34': 'rule34.xxx',
+        'e621': 'e621',
+        'danbooru': 'danbooru',
+        'safebooru': 'safebooru',
+        'yande.re': 'yande.re',
+        'paheal': 'paheal'
+    }
+    return mapping.get(api_booru_name, api_booru_name)
+
 # HTML entity replacements for XML cleaning
 HTML_ENTITY_REPLACEMENTS = {
     '&mdash;': '—', '&ndash;': '–', '&ldquo;': '"', '&rdquo;': '"',
@@ -19,6 +108,28 @@ HTML_ENTITY_REPLACEMENTS = {
     '&#039;': "'", '&apos;': "'", '&quot;': '"', '&lt;': '<', '&gt;': '>',
     '&amp;': '&'
 }
+
+def _process_rule34_response(data):
+    """
+    Process Rule34 API response, handling both success (list) and error (string) cases.
+    
+    Args:
+        data: The JSON response from Rule34 API
+        
+    Returns:
+        list: List of posts on success, empty list on error
+    """
+    if isinstance(data, list):
+        # Normal response - list of posts
+        return data
+    elif isinstance(data, str):
+        # Error response - log the error and return empty list
+        logger.warning(f"[booru_api._process_rule34_response] Rule34 API error: {data}")
+        return []
+    else:
+        # Unexpected response type
+        logger.error(f"[booru_api._process_rule34_response] Unexpected response type: {type(data)}, content: {data}")
+        return []
 
 # API configuration for different booru sites
 BOORU_APIS = {
@@ -31,7 +142,7 @@ BOORU_APIS = {
             'pid': pid
         },
         'headers': {'Accept': 'application/json'},
-        'process': lambda data: data
+        'process': lambda data: _process_rule34_response(data)
     },
     'safebooru': {
         'url': "https://safebooru.org/index.php?page=dapi&s=post&q=index",
@@ -191,7 +302,14 @@ def fetch_booru_posts(booru_type, tags=None, limit=10, pid=0):
     
     url = api['url']
     params = api['params'](tags, limit, pid)
-    headers = api.get('headers', {})
+    
+    # Add authentication parameters if available
+    params = get_auth_params(booru_type, params)
+    
+    # Get base headers and add authentication headers
+    headers = api.get('headers', {}).copy()
+    auth_headers = get_auth_headers(booru_type)
+    headers.update(auth_headers)
     
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)

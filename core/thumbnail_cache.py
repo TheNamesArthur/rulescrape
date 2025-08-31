@@ -119,17 +119,18 @@ class DiskThumbnailCache:
             return hashlib.md5(content.encode()).hexdigest()
     
     def _get_cache_filename(self, cache_key: str) -> str:
-        """Generate filename for cached thumbnail"""
-        return f"thumb_{cache_key}.png"
+        """Generate filename for cache entry"""
+        return f"thumb_{cache_key}.webp"
     
     def _get_cache_size(self) -> int:
         """Calculate current cache size in bytes"""
         total_size = 0
         try:
-            for cache_key, metadata in self.metadata.items():
-                cache_file = self.cache_dir / metadata['filename']
-                if cache_file.exists():
-                    total_size += cache_file.stat().st_size
+            # Count both WebP and PNG files for backwards compatibility
+            for cache_file in self.cache_dir.glob("thumb_*.webp"):
+                total_size += cache_file.stat().st_size
+            for cache_file in self.cache_dir.glob("thumb_*.png"):
+                total_size += cache_file.stat().st_size
         except Exception as e:
             logger.warning(f"Error calculating cache size: {e}")
         return total_size
@@ -358,30 +359,57 @@ class DiskThumbnailCache:
             return None
     
     def _save_thumbnail_to_disk(self, pil_image: Image.Image, cache_file: Path) -> bool:
-        """Save PIL Image to disk as PNG"""
+        """Save PIL Image to disk in optimized format (WebP with PNG fallback)"""
         if not PIL_AVAILABLE:
             return False
             
         try:
-            # Ensure RGB mode for PNG saving
+            # Ensure RGB mode for better compression
             if pil_image.mode not in ('RGB', 'RGBA'):
                 pil_image = pil_image.convert('RGB')
-            pil_image.save(cache_file, 'PNG', optimize=True)
-            return True
+            
+            # Try WebP first for better compression (25-35% smaller than PNG)
+            try:
+                pil_image.save(cache_file, 'WebP', quality=85, method=6, optimize=True)
+                return True
+            except Exception as webp_error:
+                logger.warning(f"WebP save failed, falling back to PNG: {webp_error}")
+                # Fallback to PNG if WebP fails
+                png_file = cache_file.with_suffix('.png')
+                pil_image.save(png_file, 'PNG', optimize=True)
+                return True
+                
         except Exception as e:
             logger.error(f"Failed to save thumbnail to {cache_file}: {e}")
             return False
     
     def _load_thumbnail_from_disk(self, cache_file: Path) -> Optional[Image.Image]:
-        """Load thumbnail from disk and return as PIL Image"""
+        """Load PIL Image from disk (supports WebP and PNG)"""
         if not PIL_AVAILABLE:
             return None
             
         try:
-            with Image.open(cache_file) as img:
-                return img.copy()  # Return PIL Image instead of PhotoImage
+            # Try loading the specified file first
+            if cache_file.exists():
+                return Image.open(cache_file)
+            
+            # If WebP file doesn't exist, try PNG fallback (for backwards compatibility)
+            if cache_file.suffix == '.webp':
+                png_file = cache_file.with_suffix('.png')
+                if png_file.exists():
+                    logger.debug(f"Loading legacy PNG thumbnail: {png_file}")
+                    return Image.open(png_file)
+            
+            # If PNG file doesn't exist, try WebP (for migration)
+            elif cache_file.suffix == '.png':
+                webp_file = cache_file.with_suffix('.webp')
+                if webp_file.exists():
+                    logger.debug(f"Loading WebP thumbnail: {webp_file}")
+                    return Image.open(webp_file)
+                    
+            return None
         except Exception as e:
-            logger.warning(f"Failed to load thumbnail from {cache_file}: {e}")
+            logger.error(f"Failed to load thumbnail from {cache_file}: {e}")
             return None
     
     def get_thumbnails_batch(self, media_paths: List[Path], size: Tuple[int, int] = (200, 200)) -> Dict[Path, Image.Image]:
@@ -502,7 +530,9 @@ class DiskThumbnailCache:
         """Clear all cached thumbnails from disk"""
         with self.cache_lock:
             try:
-                # Remove all cache files
+                # Remove all cache files (both WebP and PNG)
+                for cache_file in self.cache_dir.glob("thumb_*.webp"):
+                    cache_file.unlink()
                 for cache_file in self.cache_dir.glob("thumb_*.png"):
                     cache_file.unlink()
                 
@@ -533,7 +563,8 @@ class DiskThumbnailCache:
         """Optimize cache by removing orphaned files and compacting metadata"""
         with self.cache_lock:
             # Remove orphaned cache files (files without metadata entries)
-            cache_files = set(self.cache_dir.glob("thumb_*.png"))
+            # Support both WebP and PNG formats for backwards compatibility
+            cache_files = set(self.cache_dir.glob("thumb_*.webp")) | set(self.cache_dir.glob("thumb_*.png"))
             metadata_files = {self.cache_dir / meta['filename'] for meta in self.metadata.values()}
             
             orphaned_files = cache_files - metadata_files
@@ -552,7 +583,54 @@ class DiskThumbnailCache:
             # Clean up invalid metadata entries
             self._cleanup_invalid_entries()
             
+            # Migrate old PNG files to WebP for space savings
+            self._migrate_png_to_webp()
+            
             logger.info("Cache optimization complete")
+
+    def _migrate_png_to_webp(self):
+        """Migrate existing PNG thumbnails to WebP format for space savings"""
+        if not PIL_AVAILABLE:
+            return
+            
+        migrated_count = 0
+        
+        # Find all PNG files that could be migrated
+        png_files = list(self.cache_dir.glob("thumb_*.png"))
+        
+        for png_file in png_files:
+            try:
+                # Check if corresponding WebP already exists
+                webp_file = png_file.with_suffix('.webp')
+                if webp_file.exists():
+                    # WebP exists, safe to remove PNG
+                    png_file.unlink()
+                    migrated_count += 1
+                    continue
+                
+                # Load PNG and save as WebP
+                pil_image = Image.open(png_file)
+                if pil_image.mode not in ('RGB', 'RGBA'):
+                    pil_image = pil_image.convert('RGB')
+                
+                # Save as WebP
+                pil_image.save(webp_file, 'WebP', quality=85, method=6, optimize=True)
+                
+                # Update metadata to point to WebP file
+                cache_key = png_file.stem.replace('thumb_', '')
+                if cache_key in self.metadata:
+                    self.metadata[cache_key]['filename'] = webp_file.name
+                
+                # Remove old PNG file
+                png_file.unlink()
+                migrated_count += 1
+                
+            except Exception as e:
+                logger.warning(f"Failed to migrate PNG to WebP {png_file}: {e}")
+        
+        if migrated_count > 0:
+            logger.info(f"Migrated {migrated_count} PNG thumbnails to WebP format")
+            self._save_metadata()
 
 
 # Backwards compatibility - alias to disk cache

@@ -40,6 +40,97 @@ if TYPE_CHECKING:
 error_queue = queue.Queue()
 _error_queue_stopping = False
 
+def setup_safe_grab(dialog):
+    """
+    Set up safe grab_set for a dialog window to avoid TclError.
+    
+    Args:
+        dialog: The CTkToplevel dialog window
+    """
+    def safe_grab():
+        try:
+            if dialog.winfo_viewable():
+                dialog.grab_set()
+            else:
+                dialog.after(10, safe_grab)
+        except Exception:
+            pass  # Ignore grab errors
+    dialog.after(10, safe_grab)
+
+def create_clickable_link(parent, url, text=None, **kwargs):
+    """
+    Create a clickable link label that opens the URL in browser.
+    
+    Args:
+        parent: Parent widget
+        url: URL to open
+        text: Display text (defaults to URL)
+        **kwargs: Additional CTkLabel arguments
+    
+    Returns:
+        CTkLabel: The clickable link label
+    """
+    if text is None:
+        text = url
+    
+    # Default styling for links
+    link_kwargs = {
+        'text_color': '#1f6aa5',  # Blue color
+    }
+    link_kwargs.update(kwargs)
+    
+    label = ctk.CTkLabel(parent, text=text, **link_kwargs)
+    
+    def open_url(event=None):
+        try:
+            webbrowser.open(url)
+            print(f"🔗 Opening URL: {url}")
+        except Exception as e:
+            print(f"❌ Failed to open URL {url}: {e}")
+    
+    def on_enter(event):
+        label.configure(text_color='#0d47a1')  # Darker blue on hover
+        # Try to change cursor - CustomTkinter may not support this
+        try:
+            label.configure(cursor='hand2')
+        except:
+            pass
+    
+    def on_leave(event):
+        label.configure(text_color='#1f6aa5')  # Original blue
+        try:
+            label.configure(cursor='')
+        except:
+            pass
+    
+    label.bind('<Button-1>', open_url)
+    label.bind('<Enter>', on_enter)
+    label.bind('<Leave>', on_leave)
+    
+    return label
+
+# Constants for booru types
+DOWNLOAD_BOORU_TYPES = ["rule34", "safebooru", "danbooru", "yande.re", "paheal"]
+AUTH_BOORU_TYPES = ["rule34.xxx", "e621", "danbooru"]
+
+# Mapping between download booru names and auth booru names
+BOORU_NAME_MAPPING = {
+    'rule34': 'rule34.xxx',
+    'e621': 'e621',
+    'danbooru': 'danbooru',
+    'safebooru': 'safebooru',
+    'yande.re': 'yande.re',
+    'paheal': 'paheal'
+}
+
+# Common font definitions
+FONT_BOLD = ("weight", "bold")
+FONT_TITLE_LARGE = {"size": 24, "weight": "bold"}
+FONT_TITLE_MEDIUM = {"size": 16, "weight": "bold"}
+FONT_TITLE_SMALL = {"size": 14, "weight": "bold"}
+FONT_HEADING = {"weight": "bold"}
+FONT_SMALL = {"size": 10}
+
 def poll_error_queue(root):
     """Poll for error messages from CLI operations"""
     global _error_queue_stopping
@@ -94,6 +185,7 @@ except ImportError as e:
 try:
     from .booru_api import fetch_booru_posts, BOORU_APIS
     from .download import run_download
+    from .auth import get_auth_manager, requires_auth, get_auth_requirements, AuthManager
     # Import from parent directory (rulescrape.py)
     import sys
     import os
@@ -145,7 +237,7 @@ class ProgressiveGalleryLoader:
         # For disk cache, we'll always use progressive loading for better responsiveness
         
         # Use progressive loading for all content with disk cache
-        self.gui.log_message(f"📦 Loading {len(media_files[:gallery_limit])} thumbnails using disk cache...")
+        self.gui.log_message(f"Loading Loading {len(media_files[:gallery_limit])} thumbnails using disk cache...")
         self.loading_thread = threading.Thread(
             target=self._load_batches,
             args=(media_files[:gallery_limit],),
@@ -300,6 +392,9 @@ class RulescrapGUI:
         self.migrate_history_file()  # Migrate history file to logs directory if needed
         self.load_history()
         
+        # Initialize authentication status
+        self.auth_status_label = None  # Will be set in create_auth_settings_modern
+        
         # Download control
         self.current_download_manager = None
         self.download_thread = None
@@ -325,6 +420,10 @@ class RulescrapGUI:
         
         # Start error queue polling for CLI integration
         poll_error_queue(self.root)
+        
+    def _is_active(self):
+        """Check if the GUI is still active and not closing"""
+        return not self.is_closing and self.root and self.root.winfo_exists()
         
     def load_settings(self):
         # Default settings that combine both rulescrape and GUI settings
@@ -540,7 +639,7 @@ class RulescrapGUI:
         booru_menu = ctk.CTkOptionMenu(
             quick_frame,
             variable=self.booru_var,
-            values=["rule34", "safebooru", "danbooru", "yande.re", "paheal"],
+            values=DOWNLOAD_BOORU_TYPES,
             command=self.on_booru_change
         )
         booru_menu.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
@@ -750,7 +849,7 @@ class RulescrapGUI:
         refresh_btn = ctk.CTkButton(gallery_controls, text="🔄 Refresh", command=self.refresh_gallery)
         refresh_btn.grid(row=0, column=3, padx=10, pady=10)
         
-        open_folder_btn = ctk.CTkButton(gallery_controls, text="📁 Open Folder", command=self.open_images_folder)
+        open_folder_btn = ctk.CTkButton(gallery_controls, text="Open Folder", command=self.open_images_folder)
         open_folder_btn.grid(row=0, column=4, padx=10, pady=10)
         
         # Pagination controls (initially hidden)
@@ -764,7 +863,7 @@ class RulescrapGUI:
         self.page_label = ctk.CTkLabel(self.pagination_frame, text="Page 1 of 1")
         self.page_label.grid(row=0, column=1, padx=10)
         
-        self.next_page_btn = ctk.CTkButton(self.pagination_frame, text="Next ▶", 
+        self.next_page_btn = ctk.CTkButton(self.pagination_frame, text="Next", 
                                           command=self.next_page, width=60)
         self.next_page_btn.grid(row=0, column=2, padx=5)
         
@@ -1396,9 +1495,14 @@ class RulescrapGUI:
         """Create modern styled settings sections"""
         
         # Download Settings Section
-        download_section = self.create_settings_section("📥", "Download Settings", 
+        download_section = self.create_settings_section("", "Download Settings", 
                                                        "Configure download behavior and organization")
         self.create_download_settings_modern(download_section)
+        
+        # Authentication Settings Section  
+        auth_section = self.create_settings_section("🔐", "Authentication Settings",
+                                                   "Manage API keys and user credentials for booru sites")
+        self.create_auth_settings_modern(auth_section)
         
         # Blacklist Settings Section  
         blacklist_section = self.create_settings_section("🚫", "Blacklist Settings",
@@ -1406,17 +1510,17 @@ class RulescrapGUI:
         self.create_blacklist_settings_modern(blacklist_section)
         
         # Interface Settings Section
-        interface_section = self.create_settings_section("🎨", "Interface Settings",
+        interface_section = self.create_settings_section("", "Interface Settings",
                                                         "Customize appearance and gallery options")
         self.create_interface_settings_modern(interface_section)
         
         # Performance Settings Section
-        performance_section = self.create_settings_section("⚡", "Performance Settings",
+        performance_section = self.create_settings_section("", "Performance Settings",
                                                           "Optimize caching and thumbnail generation")
         self.create_performance_settings_modern(performance_section)
         
         # Advanced Settings Section
-        advanced_section = self.create_settings_section("🔧", "Advanced Options",
+        advanced_section = self.create_settings_section("", "Advanced Options",
                                                        "Import/export settings and system configuration")
         self.create_advanced_settings_modern(advanced_section)
         
@@ -1488,7 +1592,7 @@ class RulescrapGUI:
         row = 0
         
         # Output directory with enhanced layout
-        self.create_setting_row(parent, row, "📁", "Output Directory", 
+        self.create_setting_row(parent, row, "", "Output Directory", 
                                "Where downloaded files will be saved")
         
         dir_frame = ctk.CTkFrame(parent)
@@ -1607,16 +1711,88 @@ class RulescrapGUI:
         buttons_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
         
         button_configs = [
-            ("📋 View All", self.show_blacklist_viewer),
+            ("List View All", self.show_blacklist_viewer),
             ("📝 Edit File", self.edit_blacklist_file),
             ("📥 Import", self.import_blacklist),
-            ("📤 Export", self.export_blacklist)
+            ("Export", self.export_blacklist)
         ]
         
         for i, (text, command) in enumerate(button_configs):
             btn = ctk.CTkButton(buttons_frame, text=text, command=command, 
                                width=120, height=32)
             btn.grid(row=0, column=i, padx=10, pady=15)
+    
+    def create_auth_settings_modern(self, parent):
+        """Modern authentication settings section"""
+        row = 0
+        
+        # Master password section
+        master_frame = ctk.CTkFrame(parent)
+        master_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        master_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(master_frame, text="🔐 Master Password", 
+                    font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=(15, 10))
+        
+        # Master password entry
+        ctk.CTkLabel(master_frame, text="Password:").grid(row=1, column=0, padx=15, pady=5, sticky="w")
+        self.master_password_var = ctk.StringVar()
+        self.master_password_entry = ctk.CTkEntry(master_frame, textvariable=self.master_password_var,
+                                                 show="*", width=200, height=32)
+        self.master_password_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        
+        # Auth status
+        self.auth_status_label = ctk.CTkLabel(master_frame, text="🔴 Not authenticated", 
+                                             font=ctk.CTkFont(size=10))
+        self.auth_status_label.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        
+        # Auth buttons
+        auth_buttons_frame = ctk.CTkFrame(master_frame, fg_color="transparent")
+        auth_buttons_frame.grid(row=2, column=0, columnspan=3, padx=15, pady=(5, 15))
+        
+        self.unlock_button = ctk.CTkButton(auth_buttons_frame, text="Unlock", command=self.unlock_auth, 
+                     width=100, height=28)
+        self.unlock_button.pack(side="left", padx=5)
+        ctk.CTkButton(auth_buttons_frame, text="Change Password", command=self.change_auth_password, 
+                     width=120, height=28).pack(side="left", padx=5)
+        
+        # Update button text based on whether master password exists
+        self.update_unlock_button_text()
+        row += 1
+        
+        # Credentials management section
+        creds_frame = ctk.CTkFrame(parent)
+        creds_frame.grid(row=row, column=0, columnspan=3, sticky="ew", padx=20, pady=10)
+        creds_frame.grid_columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(creds_frame, text="🌐 Booru Credentials", 
+                    font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=3, padx=15, pady=(15, 10))
+        
+        # Booru selection for credentials
+        ctk.CTkLabel(creds_frame, text="Booru:").grid(row=1, column=0, padx=15, pady=5, sticky="w")
+        self.auth_booru_var = ctk.StringVar(value="rule34.xxx")
+        auth_booru_menu = ctk.CTkOptionMenu(creds_frame, variable=self.auth_booru_var,
+                                           values=AUTH_BOORU_TYPES,
+                                           command=self.on_auth_booru_change, width=150, height=32)
+        auth_booru_menu.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        
+        # Credentials buttons
+        creds_buttons_frame = ctk.CTkFrame(creds_frame, fg_color="transparent")
+        creds_buttons_frame.grid(row=2, column=0, columnspan=3, padx=15, pady=(5, 15))
+        
+        ctk.CTkButton(creds_buttons_frame, text="Add/Edit Credentials", command=self.edit_credentials, 
+                     width=140, height=28).pack(side="left", padx=5)
+        ctk.CTkButton(creds_buttons_frame, text="Remove Credentials", command=self.remove_credentials, 
+                     width=140, height=28).pack(side="left", padx=5)
+        ctk.CTkButton(creds_buttons_frame, text="View Requirements", command=self.view_auth_requirements, 
+                     width=140, height=28).pack(side="left", padx=5)
+        
+        # Stored credentials list
+        self.creds_list_frame = ctk.CTkFrame(creds_frame)
+        self.creds_list_frame.grid(row=3, column=0, columnspan=3, sticky="ew", padx=15, pady=(0, 15))
+        
+        self.update_credentials_display()
+        row += 1
     
     def create_interface_settings_modern(self, parent):
         """Modern interface settings section"""
@@ -1717,7 +1893,7 @@ class RulescrapGUI:
         cache_buttons = [
             ("🗑️ Clear Cache", self.clear_thumbnail_cache),
             ("📊 Cache Stats", self.show_cache_stats),
-            ("🔧 Optimize", self.optimize_cache)
+            ("Optimize", self.optimize_cache)
         ]
         
         for i, (text, command) in enumerate(cache_buttons):
@@ -1928,6 +2104,171 @@ class RulescrapGUI:
         # Run connection test in background
         threading.Thread(target=test_connection, daemon=True).start()
     
+    def update_unlock_button_text(self):
+        """Update unlock button text based on whether master password exists"""
+        try:
+            from core.auth import get_auth_manager
+            auth_manager = get_auth_manager()
+            
+            # Check if auth file exists
+            if not os.path.exists(auth_manager.auth_file_path):
+                self.unlock_button.configure(text="Set Master Password")
+            else:
+                self.unlock_button.configure(text="Unlock")
+        except Exception:
+            # Default to "Unlock" if there's any error
+            self.unlock_button.configure(text="Unlock")
+    
+    # Authentication methods
+    def unlock_auth(self):
+        """Unlock authentication with master password"""
+        password = self.master_password_var.get()
+        if not password:
+            messagebox.showwarning("Warning", "Please enter a password")
+            return
+        
+        auth_manager = get_auth_manager()
+        if auth_manager.authenticate(password):
+            self.auth_status_label.configure(text="🟢 Authenticated")
+            self.update_credentials_display()
+            self.update_unlock_button_text()  # Update button text after authentication
+            self.log_message("🔓 Authentication unlocked")
+            messagebox.showinfo("Success", "Authentication unlocked successfully")
+        else:
+            self.auth_status_label.configure(text="🔴 Authentication failed")
+            messagebox.showerror("Error", "Invalid password")
+    
+    def change_auth_password(self):
+        """Change master password"""
+        try:
+            dialog = AuthPasswordChangeDialog(self.root)
+            self.root.wait_window(dialog.dialog)  # Wait for dialog to close
+            
+            if hasattr(dialog, 'result') and dialog.result:
+                old_password, new_password = dialog.result
+                auth_manager = get_auth_manager()
+                if auth_manager.change_master_password(old_password, new_password):
+                    messagebox.showinfo("Success", "Password changed successfully")
+                    self.update_unlock_button_text()  # Update button text after password change
+                    self.log_message("🔐 Master password changed")
+                else:
+                    messagebox.showerror("Error", "Failed to change password. Check your old password.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open password change dialog: {e}")
+            self.log_message(f"❌ Error opening password change dialog: {e}")
+    
+    def on_auth_booru_change(self, value):
+        """Handle authentication booru selection change"""
+        self.update_credentials_display()
+    
+    def edit_credentials(self):
+        """Open credentials edit dialog"""
+        booru_name = self.auth_booru_var.get()
+        
+        # Check if auth is unlocked
+        auth_manager = get_auth_manager()
+        if not auth_manager._master_password:
+            messagebox.showwarning("Warning", "Please unlock authentication first")
+            return
+        
+        try:
+            dialog = CredentialsEditDialog(self.root, booru_name)
+            self.root.wait_window(dialog.dialog)  # Wait for dialog to close
+            
+            if hasattr(dialog, 'result') and dialog.result:
+                if auth_manager.add_credentials(booru_name, dialog.result):
+                    self.update_credentials_display()
+                    self.log_message(f"📝 Updated credentials for {booru_name}")
+                    messagebox.showinfo("Success", f"Credentials saved for {booru_name}")
+                else:
+                    messagebox.showerror("Error", "Failed to save credentials")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open credentials dialog: {e}")
+            self.log_message(f"❌ Error opening credentials dialog: {e}")
+    
+    def remove_credentials(self):
+        """Remove credentials for selected booru"""
+        booru_name = self.auth_booru_var.get()
+        
+        # Check if auth is unlocked
+        auth_manager = get_auth_manager()
+        if not auth_manager._master_password:
+            messagebox.showwarning("Warning", "Please unlock authentication first")
+            return
+        
+        if not auth_manager.has_credentials(booru_name):
+            messagebox.showinfo("Info", f"No credentials stored for {booru_name}")
+            return
+        
+        if messagebox.askyesno("Confirm", f"Remove credentials for {booru_name}?"):
+            if auth_manager.remove_credentials(booru_name):
+                self.update_credentials_display()
+                self.log_message(f"🗑️ Removed credentials for {booru_name}")
+                messagebox.showinfo("Success", f"Credentials removed for {booru_name}")
+            else:
+                messagebox.showerror("Error", "Failed to remove credentials")
+    
+    def view_auth_requirements(self):
+        """Show authentication requirements for selected booru"""
+        booru_name = self.auth_booru_var.get()
+        requirements = get_auth_requirements(booru_name)
+        
+        if requirements:
+            AuthRequirementsDialog(self.root, booru_name, requirements)
+        else:
+            messagebox.showinfo("Info", f"No special authentication requirements for {booru_name}")
+    
+    def update_credentials_display(self):
+        """Update the credentials display list"""
+        # Clear existing display
+        for widget in self.creds_list_frame.winfo_children():
+            widget.destroy()
+        
+        auth_manager = get_auth_manager()
+        if not auth_manager._master_password:
+            ctk.CTkLabel(self.creds_list_frame, text="🔒 Unlock authentication to view credentials",
+                        text_color="gray").pack(pady=10)
+            return
+        
+        stored_boorus = auth_manager.list_stored_boorus()
+        if not stored_boorus:
+            ctk.CTkLabel(self.creds_list_frame, text="No credentials stored",
+                        text_color="gray").pack(pady=10)
+            return
+        
+        ctk.CTkLabel(self.creds_list_frame, text="Stored Credentials:",
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(pady=(10, 5))
+        
+        for booru in stored_boorus:
+            cred_frame = ctk.CTkFrame(self.creds_list_frame, fg_color="transparent")
+            cred_frame.pack(fill="x", padx=10, pady=2)
+            
+            icon = "🟢"
+            if booru == self.auth_booru_var.get():
+                icon = "🔹"
+            
+            ctk.CTkLabel(cred_frame, text=f"{icon} {booru}").pack(side="left")
+    
+    def check_booru_auth_prompt(self, booru_name):
+        """Check if booru requires auth and prompt user if needed"""
+        # Map GUI booru names to auth system names
+        auth_booru_name = self.map_booru_name_for_auth(booru_name)
+        
+        if requires_auth(auth_booru_name):
+            auth_manager = get_auth_manager()
+            
+            # Check if we have credentials and auth is unlocked
+            if not auth_manager._master_password or not auth_manager.has_credentials(auth_booru_name):
+                requirements = get_auth_requirements(auth_booru_name)
+                if requirements:
+                    AuthPromptDialog(self.root, auth_booru_name, requirements)
+                    return False
+        return True
+    
+    def map_booru_name_for_auth(self, gui_booru_name):
+        """Map GUI booru names to authentication system names"""
+        return BOORU_NAME_MAPPING.get(gui_booru_name, gui_booru_name)
+    
     def toggle_theme(self):
         """Toggle between dark and light themes"""
         if self.theme_switch.get() == "dark":
@@ -1940,6 +2281,12 @@ class RulescrapGUI:
     
     def quick_download(self, event=None):
         """Handle quick download"""
+        booru_type = self.booru_var.get()
+        
+        # Check authentication requirements before proceeding
+        if not self.check_booru_auth_prompt(booru_type):
+            return
+        
         tags = self.tag_entry.get().strip()
         # Allow empty tags to download recent images without filtering
         # if not tags:
@@ -1957,7 +2304,7 @@ class RulescrapGUI:
         # Start download in separate thread
         self.download_thread = threading.Thread(
             target=self._perform_download,
-            args=(self.booru_var.get(), tags, limit, "quick"),
+            args=(booru_type, tags, limit, "quick"),
             daemon=True
         )
         self.download_thread.start()
@@ -2066,7 +2413,7 @@ class RulescrapGUI:
             self.current_download_manager = None
             self.download_thread = None
             # Re-enable download button on main thread
-            self.root.after(0, lambda: self.quick_dl_btn.configure(state="normal", text="🚀 Quick Download"))
+            self.root.after(0, lambda: self.quick_dl_btn.configure(state="normal", text="Quick Download"))
             self.root.after(0, lambda: self.download_btn.configure(state="normal", text="🚀 Start Download"))
             self.root.after(0, lambda: self.pause_btn.configure(state="disabled", text="⏸ Pause"))
             self.root.after(0, lambda: self.stop_btn.configure(state="disabled", text="⏹ Stop"))
@@ -2644,7 +2991,7 @@ class RulescrapGUI:
                     # Recreate cache with new settings
                     cache_dir = os.path.join(self.settings.get("output_dir", "images"), "..", "cache", "thumbnails")
                     self.thumbnail_cache = DiskThumbnailCache(cache_dir, cache_size, workers)
-                    self.log_message(f"🔧 Updated thumbnail cache: {cache_size}MB disk cache, {workers} workers")
+                    self.log_message(f"Updated thumbnail cache: {cache_size}MB disk cache, {workers} workers")
             
             # Update gallery loader batch size
             if hasattr(self, 'gallery_loader'):
@@ -2772,7 +3119,7 @@ class RulescrapGUI:
         """Optimize the disk thumbnail cache"""
         if hasattr(self, 'thumbnail_cache'):
             self.thumbnail_cache.optimize_cache()
-            self.log_message("🔧 Thumbnail cache optimized")
+            self.log_message("Thumbnail cache optimized")
             messagebox.showinfo("Cache Optimized", "Thumbnail cache has been optimized successfully!")
         else:
             messagebox.showwarning("No Cache", "Thumbnail cache is not initialized")
@@ -3014,7 +3361,7 @@ class RulescrapGUI:
             
         def update_progress():
             try:
-                if not self.is_closing and self.root and self.root.winfo_exists():
+                if self._is_active():
                     self.progress_var.set(progress_value)
                     self.progress_label.configure(text=progress_text)
             except:
@@ -3033,7 +3380,7 @@ class RulescrapGUI:
             
         def update_status():
             try:
-                if not self.is_closing and self.root and self.root.winfo_exists():
+                if self._is_active():
                     self.status_label.configure(text=message)
             except:
                 pass  # Widget destroyed, ignore
@@ -3051,7 +3398,7 @@ class RulescrapGUI:
             
         def refresh_history():
             try:
-                if not self.is_closing and self.root and self.root.winfo_exists():
+                if self._is_active():
                     self.refresh_history()
             except:
                 pass  # Widget destroyed, ignore
@@ -3069,7 +3416,7 @@ class RulescrapGUI:
             
         def update_connection():
             try:
-                if not self.is_closing and self.root and self.root.winfo_exists():
+                if self._is_active():
                     self.connection_label.configure(text=status_text)
                     if log_message:
                         self.log_message(log_message)
@@ -3483,7 +3830,9 @@ class DownloadProgressDialog:
         self.dialog.title("Download Progress")
         self.dialog.geometry("500x300")
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        
+        # Set up safe grab using utility function
+        setup_safe_grab(self.dialog)
         
         self.create_interface()
     
@@ -3532,6 +3881,301 @@ class DownloadProgressDialog:
     
     def cancel_download(self):
         self.dialog.destroy()
+
+
+class AuthPasswordChangeDialog:
+    """Dialog for changing master password"""
+    
+    def __init__(self, parent):
+        self.result = None
+        
+        self.dialog = ctk.CTkToplevel(parent)
+        self.dialog.title("Change Master Password")
+        self.dialog.geometry("400x250")
+        self.dialog.transient(parent)
+        
+        # Set up safe grab using utility function
+        setup_safe_grab(self.dialog)
+        
+        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(main_frame, text="Change Master Password", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 20))
+        
+        # Old password
+        ctk.CTkLabel(main_frame, text="Current Password:").pack(anchor="w", padx=20, pady=(5, 2))
+        self.old_password_var = ctk.StringVar()
+        old_password_entry = ctk.CTkEntry(main_frame, textvariable=self.old_password_var, 
+                                         show="*", width=300)
+        old_password_entry.pack(padx=20, pady=(0, 10))
+        
+        # New password
+        ctk.CTkLabel(main_frame, text="New Password:").pack(anchor="w", padx=20, pady=(5, 2))
+        self.new_password_var = ctk.StringVar()
+        new_password_entry = ctk.CTkEntry(main_frame, textvariable=self.new_password_var, 
+                                         show="*", width=300)
+        new_password_entry.pack(padx=20, pady=(0, 10))
+        
+        # Confirm password
+        ctk.CTkLabel(main_frame, text="Confirm New Password:").pack(anchor="w", padx=20, pady=(5, 2))
+        self.confirm_password_var = ctk.StringVar()
+        confirm_password_entry = ctk.CTkEntry(main_frame, textvariable=self.confirm_password_var, 
+                                             show="*", width=300)
+        confirm_password_entry.pack(padx=20, pady=(0, 20))
+        
+        # Buttons
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(pady=10)
+        
+        ctk.CTkButton(button_frame, text="Change Password", command=self.ok_clicked,
+                     width=120).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text="Cancel", command=self.cancel_clicked,
+                     width=120).pack(side="left", padx=5)
+        
+        old_password_entry.focus()
+    
+    def ok_clicked(self):
+        old_password = self.old_password_var.get()
+        new_password = self.new_password_var.get()
+        confirm_password = self.confirm_password_var.get()
+        
+        if not old_password or not new_password:
+            messagebox.showwarning("Warning", "Please fill in all fields")
+            return
+        
+        if new_password != confirm_password:
+            messagebox.showwarning("Warning", "New passwords do not match")
+            return
+        
+        if len(new_password) < 6:
+            messagebox.showwarning("Warning", "Password must be at least 6 characters")
+            return
+        
+        self.result = (old_password, new_password)
+        self.dialog.destroy()
+    
+    def cancel_clicked(self):
+        self.dialog.destroy()
+
+
+class CredentialsEditDialog:
+    """Dialog for editing booru credentials"""
+    
+    def __init__(self, parent, booru_name):
+        self.result = None
+        self.booru_name = booru_name
+        
+        self.dialog = ctk.CTkToplevel(parent)
+        self.dialog.title(f"Edit Credentials - {booru_name}")
+        self.dialog.geometry("450x350")
+        self.dialog.transient(parent)
+        
+        # Set up safe grab using utility function
+        setup_safe_grab(self.dialog)
+        
+        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(main_frame, text=f"Credentials for {booru_name}", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 20))
+        
+        # Get existing credentials
+        auth_manager = get_auth_manager()
+        existing_creds = auth_manager.get_credentials(booru_name) or {}
+        
+        # Get requirements for this booru
+        requirements = get_auth_requirements(booru_name)
+        self.field_vars = {}
+        
+        if requirements:
+            fields = requirements.get('fields', [])
+            
+            for field in fields:
+                # Create label and entry for each field
+                label_text = field.replace('_', ' ').title() + ":"
+                ctk.CTkLabel(main_frame, text=label_text).pack(anchor="w", padx=20, pady=(10, 2))
+                
+                var = ctk.StringVar(value=existing_creds.get(field, ''))
+                self.field_vars[field] = var
+                
+                # Use password entry for API keys and passwords
+                show_char = "*" if 'key' in field.lower() or 'password' in field.lower() else None
+                entry = ctk.CTkEntry(main_frame, textvariable=var, show=show_char, width=350)
+                entry.pack(padx=20, pady=(0, 5))
+            
+            # Show description
+            description = requirements.get('description', '')
+            if description:
+                desc_label = ctk.CTkLabel(main_frame, text=description, 
+                                         wraplength=350, font=ctk.CTkFont(size=10))
+                desc_label.pack(padx=20, pady=(10, 5))
+            
+            # Help URL
+            help_url = requirements.get('help_url', '')
+            if help_url:
+                help_label = ctk.CTkLabel(main_frame, text=f"Help: {help_url}", 
+                                         font=ctk.CTkFont(size=10), text_color="blue")
+                help_label.pack(padx=20, pady=5)
+        else:
+            # Generic username/password fields
+            ctk.CTkLabel(main_frame, text="Username:").pack(anchor="w", padx=20, pady=(10, 2))
+            self.username_var = ctk.StringVar(value=existing_creds.get('username', ''))
+            ctk.CTkEntry(main_frame, textvariable=self.username_var, width=350).pack(padx=20, pady=(0, 10))
+            
+            ctk.CTkLabel(main_frame, text="Password/API Key:").pack(anchor="w", padx=20, pady=(5, 2))
+            self.password_var = ctk.StringVar(value=existing_creds.get('password', ''))
+            ctk.CTkEntry(main_frame, textvariable=self.password_var, show="*", width=350).pack(padx=20, pady=(0, 10))
+            
+            self.field_vars = {'username': self.username_var, 'password': self.password_var}
+        
+        # Buttons
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(pady=20)
+        
+        ctk.CTkButton(button_frame, text="Save", command=self.ok_clicked,
+                     width=120).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text="Cancel", command=self.cancel_clicked,
+                     width=120).pack(side="left", padx=5)
+    
+    def ok_clicked(self):
+        credentials = {}
+        
+        for field, var in self.field_vars.items():
+            value = var.get().strip()
+            if not value:
+                messagebox.showwarning("Warning", f"Please enter {field.replace('_', ' ')}")
+                return
+            credentials[field] = value
+        
+        self.result = credentials
+        self.dialog.destroy()
+    
+    def cancel_clicked(self):
+        self.dialog.destroy()
+
+
+class AuthRequirementsDialog:
+    """Dialog showing authentication requirements for a booru"""
+    
+    def __init__(self, parent, booru_name, requirements):
+        self.dialog = ctk.CTkToplevel(parent)
+        self.dialog.title(f"Authentication Requirements - {booru_name}")
+        self.dialog.geometry("500x300")
+        self.dialog.transient(parent)
+        
+        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(main_frame, text=f"Authentication for {booru_name}", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 20))
+        
+        # Description
+        description = requirements.get('description', 'Authentication required')
+        desc_label = ctk.CTkLabel(main_frame, text=description, wraplength=400)
+        desc_label.pack(padx=20, pady=10)
+        
+        # Required fields
+        fields = requirements.get('fields', [])
+        if fields:
+            ctk.CTkLabel(main_frame, text="Required fields:", 
+                        font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
+            
+            for field in fields:
+                field_text = f"• {field.replace('_', ' ').title()}"
+                ctk.CTkLabel(main_frame, text=field_text).pack(anchor="w", padx=40)
+        
+        # Help URL
+        help_url = requirements.get('help_url', '')
+        if help_url:
+            ctk.CTkLabel(main_frame, text="For more information, visit:", 
+                        font=ctk.CTkFont(weight="bold")).pack(pady=(20, 5))
+            
+            # Create clickable link
+            link_label = create_clickable_link(main_frame, help_url, 
+                                             font=ctk.CTkFont(size=11))
+            link_label.pack(padx=20, pady=5)
+        
+        # Close button
+        ctk.CTkButton(main_frame, text="Close", command=self.dialog.destroy,
+                     width=120).pack(pady=20)
+
+
+class AuthPromptDialog:
+    """Dialog prompting user to add credentials for a booru"""
+    
+    def __init__(self, parent, booru_name, requirements):
+        self.dialog = ctk.CTkToplevel(parent)
+        self.dialog.title(f"Authentication Required - {booru_name}")
+        self.dialog.geometry("450x250")
+        self.dialog.transient(parent)
+        
+        # Set up safe grab using utility function
+        setup_safe_grab(self.dialog)
+        
+        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(main_frame, text="⚠️ Authentication Required", 
+                    font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(10, 20))
+        
+        # Description
+        description = requirements.get('description', f'{booru_name} requires authentication')
+        desc_label = ctk.CTkLabel(main_frame, text=description, wraplength=350)
+        desc_label.pack(padx=20, pady=10)
+        
+        ctk.CTkLabel(main_frame, text="You need to set up credentials to use this booru.", 
+                    wraplength=350).pack(padx=20, pady=5)
+        
+        # Buttons
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(pady=20)
+        
+        ctk.CTkButton(button_frame, text="Set Up Now", command=self.setup_clicked,
+                     width=120).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text="Skip", command=self.skip_clicked,
+                     width=120).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text="Help", command=lambda: self.show_help(requirements),
+                     width=120).pack(side="left", padx=5)
+    
+    def setup_clicked(self):
+        self.dialog.destroy()
+        # This would typically open the credentials edit dialog
+        # For now, just inform the user to go to settings
+        messagebox.showinfo("Setup Credentials", 
+                          "Please go to Settings > Authentication to set up your credentials.")
+    
+    def skip_clicked(self):
+        self.dialog.destroy()
+    
+    def show_help(self, requirements):
+        help_url = requirements.get('help_url', '')
+        if help_url:
+            # Create a custom help dialog with clickable link
+            help_dialog = ctk.CTkToplevel(self.dialog)
+            help_dialog.title("Help")
+            help_dialog.geometry("400x200")
+            help_dialog.transient(self.dialog)
+            setup_safe_grab(help_dialog)
+            
+            help_frame = ctk.CTkFrame(help_dialog)
+            help_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            ctk.CTkLabel(help_frame, text="Help & Documentation", 
+                        font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(10, 15))
+            
+            ctk.CTkLabel(help_frame, text="For detailed instructions, visit:",
+                        wraplength=300).pack(pady=5)
+            
+            # Create clickable link
+            link_label = create_clickable_link(help_frame, help_url,
+                                             font=ctk.CTkFont(size=11))
+            link_label.pack(pady=10)
+            
+            ctk.CTkButton(help_frame, text="Close", command=help_dialog.destroy,
+                         width=100).pack(pady=10)
+        else:
+            messagebox.showinfo("Help", "Please refer to the booru's documentation for API access.")
 
 
 def main_gui():

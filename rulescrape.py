@@ -284,47 +284,47 @@ if __name__ == "__main__":
         if args.blacklist_add:
             tag = args.blacklist_add.strip()
             if blacklist_manager.add_tag(tag):
-                print(f"✅ Added tag to blacklist: {tag}")
+                print(f"Added tag to blacklist: {tag}")
                 if blacklist_manager.save_blacklist():
-                    print("💾 Blacklist saved successfully")
+                    print("Blacklist saved successfully")
                 else:
-                    print("❌ Failed to save blacklist")
+                    print("Failed to save blacklist")
             else:
-                print(f"⚠️ Tag already in blacklist or invalid: {tag}")
+                print(f"WARNING:Tag already in blacklist or invalid: {tag}")
         
         # Handle blacklist remove command
         elif args.blacklist_remove:
             tag = args.blacklist_remove.strip()
             if blacklist_manager.remove_tag(tag):
-                print(f"✅ Removed tag from blacklist: {tag}")
+                print(f"Removed tag from blacklist: {tag}")
                 if blacklist_manager.save_blacklist():
-                    print("💾 Blacklist saved successfully")
+                    print("Blacklist saved successfully")
                 else:
-                    print("❌ Failed to save blacklist")
+                    print("Failed to save blacklist")
             else:
-                print(f"⚠️ Tag not found in blacklist: {tag}")
+                print(f"WARNING:Tag not found in blacklist: {tag}")
         
         # Handle blacklist list command
         elif args.blacklist_list:
             tags = blacklist_manager.get_blacklisted_tags()
             if tags:
-                print(f"📋 Blacklisted tags ({len(tags)} total):")
+                print(f"List Blacklisted tags ({len(tags)} total):")
                 for i, tag in enumerate(tags, 1):
                     print(f"  {i:3d}. {tag}")
                 
                 # Show tag groups if any
                 groups = blacklist_manager.get_tag_groups()
                 if groups:
-                    print(f"\n📁 Tag groups ({len(groups)} total):")
+                    print(f"\nTag groups ({len(groups)} total):")
                     for group_name, group_tags in groups.items():
                         print(f"  {group_name}: {', '.join(group_tags)}")
             else:
-                print("📋 No tags in blacklist")
+                print("List No tags in blacklist")
         
         # Handle blacklist stats command
         elif args.blacklist_stats:
             stats = blacklist_manager.get_blacklist_stats()
-            print("📊 Blacklist Statistics:")
+            print("Blacklist Statistics:")
             print(f"  Status: {'Enabled' if stats['enabled'] else 'Disabled'}")
             print(f"  Case sensitive: {'Yes' if stats['case_sensitive'] else 'No'}")
             print(f"  Total tags: {stats['total_tags']}")
@@ -337,9 +337,9 @@ if __name__ == "__main__":
         elif args.blacklist_enable:
             blacklist_manager.enable_blacklist()
             if blacklist_manager.save_blacklist():
-                print("✅ Blacklist enabled and saved")
+                print("Blacklist enabled and saved")
             else:
-                print("✅ Blacklist enabled (failed to save)")
+                print("Blacklist enabled (failed to save)")
         
         # Handle blacklist disable command  
         elif args.blacklist_disable:

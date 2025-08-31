@@ -4,16 +4,16 @@
 
 ---
 
-## 🔧 Features
+## Features
 
-### 🎨 Modern Interface
+### Modern Interface
  - **CustomTkinter GUI** with tabbed design (Downloads, Gallery, History, Settings)
  - **Animated Previews** - Hover over GIFs and videos to see animated previews (up to 20 frames for GIFs, 15 frames for videos)
  - **Dark/Light Theme** switching with persistent settings
  - **Progressive Gallery Loading** with disk-based thumbnail caching
  - **Real-Time Progress** tracking during downloads
 
-### 📥 Download Management  
+### Download Management  
  - Download images by tag from `rule34`, `safebooru`, `danbooru`, `yande.re`, or `paheal`
  - **Multi-tag Support** with space-separated tag input
  - **Multithreaded Downloads** with configurable worker threads
@@ -21,14 +21,14 @@
  - **Pause/Resume Downloads** with full session control
  - **Blacklist System** with CLI management for filtering unwanted content
 
-### 🧠 Smart Features
+### Smart Features
  - **AI Content Filtering** - Optional exclusion of AI-generated content using `-ai -ai_generated -ai_assisted` tags
  - **MD5-Based Duplicate Detection** with multithreaded scanning of existing images
  - **Multiple Organization Methods** - by extension and first tag, extension only, or flat structure
  - **Disk-Based Thumbnail Cache** - persistent 500MB cache with intelligent cleanup and LRU eviction
  - **Automatic Retry Logic** with exponential backoff for failed requests
 
-### 🛠️ Technical Features
+### Technical Features
  - **Configuration System** using INI files with automatic defaults
  - **Compressed Log Rotation** with automatic daily log archiving
  - **Cross-Platform Support** (Windows, Linux, macOS)
@@ -37,7 +37,7 @@
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
 ### Modern CustomTkinter Interface
 ![Modern GUI Screenshot](https://i.imgur.com/qCIpeIC.png)
@@ -50,7 +50,7 @@
 
 ---
 
-## 🖥️ Installation
+## Installation
 
 ### Option 1: Compiled Executable (Recommended for End Users)
 
@@ -97,7 +97,7 @@
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### Modern GUI Interface:
 
@@ -192,7 +192,7 @@ python rulescrape.py --cli --booru_type rule34 --limit 30
 
 ---
 
-## 🧠 Anti-AI Tagging
+## Anti-AI Tagging
 
 When Anti-AI is enabled, the following tags are appended to your search:
 
@@ -204,33 +204,33 @@ This helps reduce the appearance of AI-generated content in results—especially
 
 ---
 
-## 🛠️ Advanced Features & Technical Details
+## Advanced Features ## 🛠Advanced Features & Technical Details Technical Details
 
-### 🎞️ Animated Previews
+### Animated Previews
 - **GIF Animation** - Hover over GIF thumbnails to see up to 20 frames in sequence
 - **Video Thumbnails** - Automatic thumbnail generation from MP4/WebM using OpenCV (10% position)
 - **Memory Management** - Preview cache limited to 30 animations with FIFO eviction
 - **Frame Extraction** - Smart frame sampling for smooth preview experience (~8fps playback)
 
-### 🔧 Performance & Caching
+### Performance ### Performance ### 🔧 Performance & Caching Caching Caching
 - **Disk Thumbnail Cache** - 500MB persistent cache with PNG compression
 - **Multithreaded Processing** - Configurable workers (default: half of CPU cores) for thumbnail generation  
 - **Progressive Loading** - Gallery loads in batches (default: 12 items) for responsive UI
 - **LRU Eviction** - Automatic cleanup when cache exceeds size limit (reduces to 80% capacity)
 
-### 🔄 Download Management
+### Download Management
 - **Session Control** - Pause/resume downloads with proper thread management
 - **Exponential Backoff** - Automatic retry logic for rate-limited APIs (5 retries max)
 - **Progress Reporting** - Real-time callbacks for GUI integration
 - **Cancellation Support** - Clean thread shutdown and resource cleanup
 
-### 📊 Duplicate Detection
+### Duplicate Detection
 - **MD5 Hash Comparison** - Content-based duplicate detection across all images
 - **Multithreaded Scanning** - Fast existing image scanning on startup
 - **Session Tracking** - Counts duplicates found during current download session
 - **Atomic Downloads** - Temporary file system prevents corrupted partial downloads
 
-### 🏷️ Blacklist System
+### Blacklist System
 - **Tag Filtering** - Server-side filtering using blacklisted tags
 - **CLI Management** - Complete command-line interface for blacklist operations
 - **Persistent Storage** - JSON-based blacklist configuration
@@ -288,7 +288,7 @@ ImportError: No module named 'customtkinter'
 
 ## 📌 Current V1.5 Features
 
-**✅ Implemented Features:**
+**Implemented Features:**
 - **Modern CustomTkinter GUI** - Complete interface with tabbed design
 - **Animated Preview System** - Hover animations for GIFs (20 frames) and videos (15 frames) 
 - **Disk-Based Thumbnail Cache** - 500MB persistent storage with intelligent cleanup
@@ -302,7 +302,7 @@ ImportError: No module named 'customtkinter'
 - **Progressive Gallery Loading** - Batched thumbnail loading for responsive UI
 - **Comprehensive Logging** - Compressed daily log rotation with detailed debugging
 
-**🔄 Current Architecture:**
+**Current Architecture:**
 - **Modular Core Package** - 8 specialized modules (6,000+ lines total)
 - **Unified Settings System** - INI-based configuration with automatic defaults
 - **Thread-Safe Operations** - Proper synchronization for concurrent downloads
